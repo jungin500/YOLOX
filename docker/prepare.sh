@@ -83,6 +83,7 @@ ln -s ${ARTIFACT_DIR} YOLOX_outputs/yolox_l_aihub_cs_coco
 pip3 uninstall -y numpy opencv-python opencv-python-headless
 rm -rf /opt/conda/lib/python3.8/site-packages/cv2
 
+sed -i "s/^opencv_python$/opencv-python-headless/g" requirements.txt
 pip3 install -r requirements.txt
 pip3 install -v -e .
 
