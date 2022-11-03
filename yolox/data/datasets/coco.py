@@ -12,6 +12,8 @@ from pycocotools.coco import COCO
 from ..dataloading import get_yolox_datadir
 from .datasets_wrapper import Dataset
 
+import pickle
+from tqdm.auto import tqdm
 
 def remove_useless_info(coco):
     """
@@ -82,7 +84,39 @@ class COCODataset(Dataset):
         del self.imgs
 
     def _load_coco_annotations(self):
-        return [self.load_anno_from_ids(_ids) for _ids in self.ids]
+        if self.load_anno_cache():
+            logger.warning("Loaded annotation cache")
+            return self.anno_cache
+        
+        annotation =  [self.load_anno_from_ids(_ids) for _ids in tqdm(self.ids, desc="Loading COCO annotation")]
+        cache_filename = os.path.join(
+            self.data_dir,
+            "annotations",
+            self.json_file.replace('.json', '.cache')
+        )
+        with open(cache_filename, 'wb') as f:
+            pickle.dump(annotation, f)
+        logger.warning("Saved annotation cache")
+            
+        return annotation
+
+    def load_anno_cache(self):
+        cache_filename = os.path.join(
+            self.data_dir,
+            "annotations",
+            self.json_file.replace('.json', '.cache')
+        )
+        
+        if not os.path.exists(cache_filename):
+            return False
+        
+        with open(cache_filename, 'rb') as f:
+            self.anno_cache = pickle.load(f)
+            
+        if len(self.ids) != len(self.anno_cache):
+            logger.warning("Disabling annotation cache as different number of ImageSets!")
+            return False
+        return True
 
     def _cache_images(self):
         logger.warning(
@@ -134,10 +168,16 @@ class COCODataset(Dataset):
         )
 
     def load_anno_from_ids(self, id_):
-        im_ann = self.coco.loadImgs(id_)[0]
+        if type(id_) == list:
+            im_ann = self.coco.loadImgs(id_)[0]
+        elif type(id_) == str:
+            im_ann = self.coco.loadImgs([id_])[0]
         width = im_ann["width"]
         height = im_ann["height"]
-        anno_ids = self.coco.getAnnIds(imgIds=[int(id_)], iscrowd=False)
+        try:
+            anno_ids = self.coco.getAnnIds(imgIds=[int(id_)], iscrowd=False)
+        except ValueError:
+            anno_ids = self.coco.getAnnIds(imgIds=[id_], iscrowd=False)
         annotations = self.coco.loadAnns(anno_ids)
         objs = []
         for obj in annotations:

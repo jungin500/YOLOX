@@ -1,0 +1,6 @@
+226c226,228
+<         if _isArrayLike(ids):
+---
+>         if type(ids) == str:
+>             return [self.imgs[ids]]
+>         elif _isArrayLike(ids):
