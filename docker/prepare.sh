@@ -47,7 +47,7 @@ elif [ ! -f "${COCO_TRAINVAL_ANNOTATION}" ]; then
 elif [ ! -f "${COCO_TEST_ANNOTATION}" ]; then
     >&2 echo "FATAL: COCO_TEST_ANNOTATION directory ${COCO_TEST_ANNOTATION} not found."
     exit 1
-elif [ ! -f "${ARTIFACT_ROOT}" ]; then
+elif [ ! -d "${ARTIFACT_ROOT}" ]; then
     >&2 echo "FATAL: ARTIFACT_ROOT directory ${ARTIFACT_ROOT} not found."
     exit 1
 fi
