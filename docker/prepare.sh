@@ -69,7 +69,7 @@ ARTIFACT_DIR=${ARTIFACT_ROOT}/$(hostname | cut -c 11-)_$(date +%Y%m%d_%H%M)
 mkdir ${ARTIFACT_DIR}
 
 # Clone repository
-git clone REPOSITORY_URL YOLOX
+git clone ${REPOSITORY_URL} YOLOX
 
 # Note that we changed directory
 cd YOLOX
