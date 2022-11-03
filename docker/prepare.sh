@@ -28,9 +28,10 @@ fi
 if [ "$UID" -ne "0" ]; then
     >&2 echo "User is not root!"
     exit 1
-elif [ "${WANDB_API_KEY}" -eq "" ]; then
-    >&2 echo "wandb API key not specified"
-    exit 1
+fi
+
+if [ -z "${WANDB_API_KEY}" ]; then
+    echo "Wandb disabled"
 fi
 
 # Check path and file for sanity check
@@ -85,9 +86,11 @@ rm -rf /opt/conda/lib/python3.8/site-packages/cv2
 pip3 install -r requirements.txt
 pip3 install -v -e .
 
-# Install wandb
-pip3 install wandb
-wandb login ${WANDB_API_KEY}
+if [ ! -z "${WANDB_API_KEY}" ]; then
+    # Install wandb
+    pip3 install wandb
+    wandb login ${WANDB_API_KEY}
+fi
 
 # Copy dataset (JPEGImages only, for compat reason. ALSO with COCO type dataset)
 # Dynamic copy - will copy if local storage has some capacity, or just link.
