@@ -7,7 +7,7 @@ def merge_coco(all_annotations):
         "images": [],
         "type": "instances",
         "annotations": [],
-        "categories": all_annotations[0]  # 그대로 가져감
+        "categories": all_annotations[0]['categories']  # 그대로 가져감
     }
 
     for annotation in all_annotations:
