@@ -145,7 +145,7 @@ class MultiscaleGenerator(DatasetGenerator):
         }
 
     def multiscale_match(self, image_name, bboxes_scales, cls_scales, scores_scales):
-        o_items = list(filter(lambda item: item['image_id'] == image_name, self.annotations['annotations']))
+        o_items = self.annotation_map[image_name]
 
         o_cls = np.array(list(map(lambda item : cocoid2classid(item['category_id']), o_items))).astype(int)
         o_bboxes = np.array(list(map(lambda item : item['bbox'], o_items)))

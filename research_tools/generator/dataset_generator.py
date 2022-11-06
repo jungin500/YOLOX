@@ -23,6 +23,14 @@ class DatasetGenerator(object):
         with open(os.path.join(exp.data_dir, 'annotations', exp.val_ann), 'r') as f:
             self.annotations = json.load(f)
 
+        # Create imageid to annotation mapping table
+        self.annotation_map = {}
+        for annotation in self.annotations['annotations']:
+            image_id = annotation['image_id']
+            if image_id not in self.annotation_map:
+                self.annotation_map[image_id] = []
+            self.annotation_map[image_id].append(annotation)
+
     def init(self):
         raise NotImplementedError()
 

@@ -164,7 +164,7 @@ class IOUGenerator(DatasetGenerator):
         }
 
     def iou_match(self, image_name, bboxes, cls, scores):
-        o_items = list(filter(lambda item: item['image_id'] == image_name, self.annotations['annotations']))
+        o_items = self.annotation_map[image_name]
 
         o_cls = np.array(list(map(lambda item : cocoid2classid(item['category_id']), o_items))).astype(int)
         o_bboxes = np.array(list(map(lambda item : item['bbox'], o_items)))
