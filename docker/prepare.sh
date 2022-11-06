@@ -84,8 +84,8 @@ pip3 uninstall -y numpy opencv-python opencv-python-headless
 rm -rf /opt/conda/lib/python3.8/site-packages/cv2
 
 sed -i "s/^opencv_python$/opencv-python-headless/g" requirements.txt
-pip3 install -r requirements.txt
-pip3 install -v -e .
+pip3 install -r requirements.txt --progress-bar off
+pip3 install -v -e . --progress-bar off
 
 if [ ! -z "${WANDB_API_KEY}" ]; then
     # Install wandb
