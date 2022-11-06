@@ -10,7 +10,6 @@ class DatasetGenerator(object):
         device,
         is_distributed,
         batch_size,
-        output_filename,
         half_precision
     ):
         self.exp = exp
@@ -18,7 +17,6 @@ class DatasetGenerator(object):
         self.device = device
         self.is_distributed = is_distributed
         self.batch_size = batch_size
-        self.output_filename = output_filename
         self.half_precision = half_precision
         
         # Load COCO annotation

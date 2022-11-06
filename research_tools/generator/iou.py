@@ -4,7 +4,7 @@ import json
 from tqdm.auto import tqdm
 
 from yolox.utils import postprocess
-from yolox.utils.dist import get_local_rank, wait_for_the_master
+from yolox.utils.dist import get_local_rank, get_world_size, wait_for_the_master
 
 from .dataset_generator import DatasetGenerator
 from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np
@@ -36,7 +36,6 @@ class IOUGenerator(DatasetGenerator):
         device,
         is_distributed,
         batch_size,
-        output_filename,
         half_precision
     ):
         super().__init__(
@@ -45,7 +44,6 @@ class IOUGenerator(DatasetGenerator):
             device = device,
             is_distributed = is_distributed,
             batch_size = batch_size,
-            output_filename = output_filename,
             half_precision = half_precision
         )
         self.conf_thresh = conf
@@ -61,7 +59,7 @@ class IOUGenerator(DatasetGenerator):
     
         logger.info('Initializing dataloader ...')
         with wait_for_the_master(get_local_rank()):
-            dataset_map = COCODataset(
+            dataset = COCODataset(
                 data_dir=self.exp.data_dir,
                 json_file=self.exp.val_ann,
                 name="val2017",
@@ -71,25 +69,34 @@ class IOUGenerator(DatasetGenerator):
 
         if self.is_distributed:
             self.batch_size = self.batch_size // dist.get_world_size()
-            sampler_map = torch.utils.data.distributed.DistributedSampler(
-                dataset_map, shuffle=False
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset,
+                rank=get_local_rank(),
+                num_replicas=get_world_size(), 
+                shuffle=False,
+                drop_last=False
             )
         else:
-            sampler_map = torch.utils.data.SequentialSampler(dataset_map)
+            sampler = torch.utils.data.SequentialSampler(dataset)
 
         dataloader_kwargs = {
             "num_workers": self.exp.data_num_workers,
             "pin_memory": True,
-            "sampler": sampler_map,
+            "sampler": sampler,
             "collate_fn": collate_fn,
         }
         dataloader_kwargs["batch_size"] = self.batch_size
-        self.dataloader = torch.utils.data.DataLoader(dataset_map, **dataloader_kwargs)
+        self.dataloader = torch.utils.data.DataLoader(dataset, **dataloader_kwargs)
 
     def generate_dataset(self):
         results = []
+        
+        if self.is_distributed:
+            desc_msg = "[Rank {}] Inferencing".format(get_local_rank())
+        else:
+            desc_msg = "Inferencing"
 
-        for total_batch_idx, (img, target, img_info, img_id) in tqdm(enumerate(self.dataloader), desc="Inferencing", total=len(self.dataloader)):
+        for total_batch_idx, (img, target, img_info, img_id) in tqdm(enumerate(self.dataloader), desc=desc_msg, total=len(self.dataloader)):
             if self.device == 'gpu':
                 img = img.cuda()
             if self.half_precision:
@@ -149,13 +156,12 @@ class IOUGenerator(DatasetGenerator):
                         'id': len(result_annotations) + 1  # 1부터 시작한다.
                     })
 
-        with open(self.output_filename, 'w') as f:
-            json.dump({
-                "images": [ images_map[image_id] for image_id, bboxes in results ],
-                "type": "instances",
-                "annotations": result_annotations,
-                "categories": self.annotations["categories"]
-            }, f)
+        return {
+            "images": [ images_map[image_id] for image_id, bboxes in results ],
+            "type": "instances",
+            "annotations": result_annotations,
+            "categories": self.annotations["categories"]
+        }
 
     def iou_match(self, image_name, bboxes, cls, scores):
         o_items = list(filter(lambda item: item['image_id'] == image_name, self.annotations['annotations']))

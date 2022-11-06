@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 from copy import deepcopy
 
 from yolox.utils import postprocess
-from yolox.utils.dist import get_local_rank, wait_for_the_master
+from yolox.utils.dist import get_local_rank, get_world_size, wait_for_the_master
 
 from .dataset_generator import DatasetGenerator
 from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np
@@ -23,7 +23,6 @@ class MultiscaleGenerator(DatasetGenerator):
         device,
         is_distributed,
         batch_size,
-        output_filename,
         half_precision
     ):
         super().__init__(
@@ -32,7 +31,6 @@ class MultiscaleGenerator(DatasetGenerator):
             device = device,
             is_distributed = is_distributed,
             batch_size = batch_size,
-            output_filename = output_filename,
             half_precision = half_precision
         )
         self.scales = scales
@@ -69,7 +67,11 @@ class MultiscaleGenerator(DatasetGenerator):
             if self.is_distributed:
                 target_batch_size = self.batch_size // dist.get_world_size()
                 sampler_map[scale] = torch.utils.data.distributed.DistributedSampler(
-                    dataset_map[scale], shuffle=False
+                    dataset_map[scale],
+                    rank=get_local_rank(),
+                    num_replicas=get_world_size(), 
+                    shuffle=False,
+                    drop_last=False
                 )
             else:
                 target_batch_size = self.batch_size
@@ -95,9 +97,14 @@ class MultiscaleGenerator(DatasetGenerator):
 
     def generate_dataset(self):
         results = []
+        
+        if self.is_distributed:
+            desc_msg = "[Rank {}] Inferencing".format(get_local_rank())
+        else:
+            desc_msg = "Inferencing"
 
         iterators = { scale: iter(self.dataloader_map[scale]) for scale in self.scales }
-        for total_batch_idx in tqdm(range(len(self.dataloader_map[next(iter(self.scales))])), desc="Inferencing"):
+        for total_batch_idx in tqdm(range(len(self.dataloader_map[next(iter(self.scales))])), desc=desc_msg):
             bboxes_batched, cls_batched, scores_batched, image_names = self.infer_batch(iterators)
 
             for batch_idx in range(len(bboxes_batched)):
@@ -129,14 +136,13 @@ class MultiscaleGenerator(DatasetGenerator):
                         'image_id': image_id,
                         'id': len(result_annotations) + 1  # 1부터 시작한다.
                     })
-
-        with open(self.output_filename, 'w') as f:
-            json.dump({
-                "images": [ images_map[image_id] for image_id, bboxes in results ],
-                "type": "instances",
-                "annotations": result_annotations,
-                "categories": self.annotations["categories"]
-            }, f)
+                    
+        return {
+            "images": [ images_map[image_id] for image_id, bboxes in results ],
+            "type": "instances",
+            "annotations": result_annotations,
+            "categories": self.annotations["categories"]
+        }
 
     def multiscale_match(self, image_name, bboxes_scales, cls_scales, scores_scales):
         o_items = list(filter(lambda item: item['image_id'] == image_name, self.annotations['annotations']))

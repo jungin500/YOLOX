@@ -4,6 +4,7 @@
 import argparse
 import os
 from loguru import logger
+from tqdm.auto import tqdm
 
 import cv2
 
@@ -49,10 +50,17 @@ def main(args):
     vis_window_title = 'Dataset visualization'
     cv2.namedWindow(vis_window_title)
     
+    logger.info("Loading annotation ...")
     with open(args.coco_annotation, 'r') as f:
         annotation = json.load(f)
+    logger.info("Loaded {} images and {} annootations".format(len(annotation['images']), len(annotation['annotations'])))
 
-    bbox_map = { image['id']: list(filter(lambda item: item['image_id'] == image['id'], annotation['annotations'])) for image in annotation['images'] }
+    logger.info("Mapping annotation ...")
+    # Slowest implementation
+    # bbox_map = { image['id']: list(filter(lambda item: item['image_id'] == image['id'], annotation['annotations'])) for image in tqdm(annotation['images'], "Creating image idmap for faster demo ...") }
+    # Faster implementation
+    bbox_map = { image['id']: [] for image in annotation['images'] }
+    [bbox_map[item['image_id']].append(item) for item in annotation['annotations']]
     idmap = { category['id']: category['name'] for category in annotation['categories'] }
     colormap = {
         # helmet_on
@@ -69,6 +77,7 @@ def main(args):
         logger.info("Shuffling dataset")
         random.shuffle(annotation['images'])
 
+    logger.info("Done, beginning visualization ...")
     for image_info in annotation['images']:
         image_path = os.path.join(image_root, image_info['id'] + '.jpg')
         assert os.path.exists(image_path), "Image path \"{}\" not found.".format(image_path)

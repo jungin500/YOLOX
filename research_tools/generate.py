@@ -13,13 +13,13 @@ from loguru import logger
 
 import torch
 import torch.backends.cudnn as cudnn
+import torch.distributed as dist
 from yolox.core.launch import launch
 
 from yolox.exp import get_exp
 from yolox.utils import fuse_model, get_model_info
 
-from yolox.utils.dist import get_local_rank
-
+from yolox.utils.dist import get_local_rank, get_local_size
 from yolox.utils.setup_env import configure_module, configure_nccl
 
 import warnings
@@ -27,7 +27,10 @@ import random
 import sys
 
 from generator import NaiiveGenerator, MultiscaleGenerator, IOUGenerator
+import json
+import os
 
+from util import merge_coco
 
 def make_parser():
     parser = argparse.ArgumentParser("YOLOX COCO Annotation Generator")
@@ -185,19 +188,20 @@ def main(exp, args, num_gpu):
     if args.strategy == 'naiive':
         print("[naiive] Generating using Confidence {:.2f} and NMS-IoU {:.2f}".format(args.conf, args.nms))
         assert '--scales' not in ' '.join(sys.argv), "scales should not be applied on current strategy."
+        assert '--generator-conf' not in ' '.join(sys.argv), "generator confidence should not be applied on current strategy."
+        assert '--generator-iou' not in ' '.join(sys.argv), "generator iou should not be applied on current strategy."
         generator = NaiiveGenerator(
             exp = exp,
             model = model,
             device = args.device,
             is_distributed = is_distributed,
             batch_size = args.batch_size,
-            output_filename = args.output_path,
             half_precision = args.fp16
         )
 
     elif args.strategy == 'iou':
         print("[iou] Generating using Confidence {:.2f} and NMS-IoU {:.2f}".format(args.conf, args.nms))
-        print("[scales] and Generating using Confidence {:.2f} and IoU Thresh {:.2f}".format(args.generator_conf, args.generator_iou))
+        print("[iou] and Generating using Confidence {:.2f} and IoU Thresh {:.2f}".format(args.generator_conf, args.generator_iou))
         assert '--scales' not in ' '.join(sys.argv), "scales should not be applied on current strategy."
         generator = IOUGenerator(
             exp = exp,
@@ -207,7 +211,6 @@ def main(exp, args, num_gpu):
             device = args.device,
             is_distributed = is_distributed,
             batch_size = args.batch_size,
-            output_filename = args.output_path,
             half_precision = args.fp16
         )
         
@@ -226,7 +229,6 @@ def main(exp, args, num_gpu):
             device = args.device,
             is_distributed = is_distributed,
             batch_size = args.batch_size,
-            output_filename = args.output_path,
             half_precision = args.fp16
         )
 
@@ -234,7 +236,48 @@ def main(exp, args, num_gpu):
         raise NotImplementedError("Strategy type {} not implemented".format(args.strategy))
 
     generator.init()
-    generator.generate_dataset()
+    coco_result = generator.generate_dataset()
+
+    if not is_distributed:
+        # Save result with single file
+        with open(args.output_path, 'w') as f:
+            json.dump(coco_result, f)
+    else:
+        # Save each rank into separate file
+        with open(args.output_path + '.r{}.tmp'.format(rank), 'w') as f:
+            json.dump(coco_result, f)
+
+        # Merge all rank's result into single json file
+        dist.barrier()  # Make sure all rank wrote json file
+        
+        if rank == 0:
+            # Do tasks on master rank
+            all_annotations = []
+            for another_rank_id in range(get_local_size()):
+                with open(args.output_path + '.r{}.tmp'.format(another_rank_id)) as f:
+                    all_annotations.append(json.load(f))
+            
+            # Sanity check
+            assert len(all_annotations) > 0, "Empty annotation?"
+            for idx, annotation in enumerate(all_annotations):
+                json_filename = args.output_path + '.r{}.tmp'.format(idx)
+                assert len(annotation["images"]) > 0, "Empty images in file {}".format(json_filename)
+                assert len(annotation["annotations"]) > 0, "Empty annotations in file {}".format(json_filename)
+            assert len(set([json.dumps(annotation["categories"]) for annotation in all_annotations])) == 1, \
+                "Different categories between annotations!"
+            
+            # Merge annotations
+            result_annotation = merge_coco(all_annotations)
+            
+            # Save result annotation and remove each rank's artifacts
+            with open(args.output_path, 'w') as f:
+                json.dump(result_annotation, f)
+                
+            for another_rank_id in range(get_local_size()):
+                os.unlink(args.output_path + '.r{}.tmp'.format(another_rank_id))
+        
+        # Synchronize until master worker works hard ;)    
+        dist.barrier()
 
 if __name__ == "__main__":
     configure_module()
