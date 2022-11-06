@@ -17,7 +17,7 @@ import warnings
 import sys
 import json
 
-from .util.merge_coco import merge_coco
+from util.merge_coco import merge_coco
 
 def make_parser():
     parser = argparse.ArgumentParser("COCO Multiple annotation merger")
