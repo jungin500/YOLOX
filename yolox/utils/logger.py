@@ -247,7 +247,7 @@ class WandbLogger(object):
                 img = np.transpose(img, (1, 2, 0))
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-                if isinstance(id, torch.Tensor):
+                if isinstance(id, torch.Tensor) or isinstance(id, np.ndarray):
                     id = id.item()
 
                 self.val_table.add_data(
