@@ -221,8 +221,14 @@ class COCOEvaluator:
             cls = output[:, 6]
             scores = output[:, 4] * output[:, 5]
 
+            try:
+                key_id = int(img_id)
+            except ValueError:  # img_id가 int 변환 불가능한 경우
+                key_id = img_id
+
+
             image_wise_data.update({
-                int(img_id): {
+                key_id: {
                     "bboxes": [box.numpy().tolist() for box in bboxes],
                     "scores": [score.numpy().item() for score in scores],
                     "categories": [
@@ -237,7 +243,7 @@ class COCOEvaluator:
             for ind in range(bboxes.shape[0]):
                 label = self.dataloader.dataset.class_ids[int(cls[ind])]
                 pred_data = {
-                    "image_id": int(img_id),
+                    "image_id": key_id,
                     "category_id": label,
                     "bbox": bboxes[ind].numpy().tolist(),
                     "score": scores[ind].numpy().item(),
@@ -305,10 +311,18 @@ class COCOEvaluator:
             cat_names = [cocoGt.cats[catId]['name'] for catId in sorted(cat_ids)]
             if self.per_class_AP:
                 AP_table = per_class_AP_table(cocoEval, class_names=cat_names)
-                info += "per class AP:\n" + AP_table + "\n"
+                info += "per class AP(IoU=0.5~0.95):\n" + AP_table + "\n"
             if self.per_class_AR:
                 AR_table = per_class_AR_table(cocoEval, class_names=cat_names)
-                info += "per class AR:\n" + AR_table + "\n"
+                info += "per class AR(IoU=0.5~0.95):\n" + AR_table + "\n"
+            # Additional evaluation for per_class_AP IoU=0.5
+            cocoEval_50 = COCOeval(cocoGt, cocoDt, annType[1])
+            cocoEval_50.params.iouThrs = np.array([0.5])  # Only 0.5
+            cocoEval_50.evaluate()
+            cocoEval_50.accumulate()
+            AP_table = per_class_AP_table(cocoEval_50, class_names=cat_names)
+            info += "per class AP(IoU=0.5):\n" + AP_table + "\n"
+            # END Additional evaluation for per_class_AP IoU=0.5
             return cocoEval.stats[0], cocoEval.stats[1], info
         else:
             return 0, 0, info
