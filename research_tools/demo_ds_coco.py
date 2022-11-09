@@ -24,6 +24,7 @@ def make_parser():
         help="Shuffle dataset (intend not to preserve its order)"
     )
     parser.add_argument("--seed", default=None, type=int, help="Shuffle seed for displaying same image")
+    parser.add_argument("--save-recent", default=None, type=int, help="Save recent N items into output/ folder, named <annotation_filename>_XXXXX.jpg")
     parser.add_argument("--image-root", default="parent", type=str, help="Image root folder of COCO annotation (default: ../val2017 of coco_annotation file)")
     parser.add_argument(
         "coco_annotation",
@@ -47,8 +48,9 @@ def main(args):
     else:
         image_root = args.image_root
 
-    vis_window_title = 'Dataset visualization'
-    cv2.namedWindow(vis_window_title)
+    if args.save_recent is None:
+        vis_window_title = 'Dataset visualization'
+        cv2.namedWindow(vis_window_title)
     
     logger.info("Loading annotation ...")
     with open(args.coco_annotation, 'r') as f:
@@ -78,7 +80,7 @@ def main(args):
         random.shuffle(annotation['images'])
 
     logger.info("Done, beginning visualization ...")
-    for image_info in annotation['images']:
+    for idx, image_info in enumerate(annotation['images']):
         image_path = os.path.join(image_root, image_info['id'] + '.jpg')
         assert os.path.exists(image_path), "Image path \"{}\" not found.".format(image_path)
 
@@ -120,11 +122,18 @@ def main(args):
                 1.0, colormap[item['category_id']], 1
             )
 
-        cv2.imshow(vis_window_title, image)
-        key = cv2.waitKey(0)
-        if key == 113:
-            logger.info("Stopping viewer")
-            break
+        if args.save_recent is None:
+            cv2.imshow(vis_window_title, image)
+            key = cv2.waitKey(0)
+            if key == 113:
+                logger.info("Stopping viewer")
+                break
+        else:
+            cv2.imwrite()
+
+            items_to_save = args.save_recent
+            if items_to_save <= idx:
+                break
 
 if __name__ == "__main__":
     args = make_parser().parse_args()
