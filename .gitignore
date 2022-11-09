@@ -219,3 +219,11 @@ events.out.tfevents*
 
 # vim
 .vim
+
+# ignore wandb artifacts
+artifacts/
+wandb/
+
+# ignore k8s yamls
+research/**/
+research_legacy/
