@@ -238,11 +238,12 @@ class WandbLogger(object):
         """
         if self.val_artifact is None:
             self.val_artifact = self.wandb.Artifact(name="validation_images", type="dataset")
-            self.val_table = self.wandb.Table(columns=["id", "input"])
+            self.val_table = self.wandb.Table(columns=["id", "input", "width", "height"])
 
             for i in range(self.num_log_images):
                 data_point = val_dataset[i]
                 img = data_point[0]
+                img_h, img_w = data_point[2]
                 id = data_point[3]
                 img = np.transpose(img, (1, 2, 0))
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -252,7 +253,9 @@ class WandbLogger(object):
 
                 self.val_table.add_data(
                     id,
-                    self.wandb.Image(img)
+                    self.wandb.Image(img),
+                    img_w,
+                    img_h
                 )
 
             self.val_artifact.add(self.val_table, "validation_images_table")
@@ -337,15 +340,27 @@ class WandbLogger(object):
             if isinstance(id, list):
                 id = id[0]
 
+            # Resize bbox according to infer size (640x640, or etc)
+            resized_image = val[1]
+            input_img_w, input_img_h = val[2], val[3]
+            r_img_w, r_img_h = resized_image.image.width, resized_image.image.height
+
+            # Resized images are ratio-aware so r_img_h is 360, not 640.
+            input_img_scale = input_img_h / input_img_w
+            r_img_h_scaled = r_img_w * input_img_scale
+
             if id in predictions:
                 prediction = predictions[id]
                 boxes = []
                 for i in range(len(prediction["bboxes"])):
                     bbox = prediction["bboxes"][i]
-                    x0 = bbox[0]
-                    y0 = bbox[1]
-                    x1 = bbox[2]
-                    y1 = bbox[3]
+                    conf = prediction["scores"][i]
+                    # 1920x1080 기준의 BBOX를 이미지 크기만큼 줄여야 한다.
+                    # Scale aware 
+                    x0 = bbox[0] / input_img_w * r_img_w
+                    y0 = bbox[1] / input_img_h * r_img_h_scaled
+                    x1 = bbox[2] / input_img_w * r_img_w
+                    y1 = bbox[3] / input_img_h * r_img_h_scaled
                     box = {
                         "position": {
                             "minX": min(x0, x1),
@@ -354,6 +369,8 @@ class WandbLogger(object):
                             "maxY": max(y0, y1)
                         },
                         "class_id": prediction["categories"][i],
+                        "box_caption": "%s %.3f" % (self.id_to_class[prediction["categories"][i]], conf),
+                        "scores": {"class_score": conf},
                         "domain": "pixel"
                     }
                     avg_scores[
@@ -372,7 +389,7 @@ class WandbLogger(object):
                 average_class_score.append(score)
             result_table.add_data(
                 idx,
-                self.wandb.Image(val[1], boxes={
+                self.wandb.Image(resized_image, boxes={
                         "prediction": {
                             "box_data": boxes,
                             "class_labels": self.id_to_class
