@@ -26,14 +26,14 @@ import warnings
 import random
 import sys
 
-from generator import NaiiveGenerator, MultiscaleGenerator, IOUGenerator
+from generator import NaiiveGenerator, NaiiveAdvancedGenerator, MultiscaleGenerator, IOUGenerator
 import json
 import os
 
 from util import merge_coco
 
 def make_parser():
-    parser = argparse.ArgumentParser("YOLOX COCO Annotation Generator")
+    parser = argparse.ArgumentParser("YOLOX COCO Annotation Generator", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-o", "--output", dest="output_path", default="annotations_generated.json", help="COCO-type Annotation output JSON filename")
     parser.add_argument("-n", "--name", type=str, default=None, help="model name")
 
@@ -104,8 +104,15 @@ def make_parser():
         dest="strategy",
         default="naiive",
         type=str,
-        choices=["naiive", "iou", "scales"],
+        choices=["naiive", "naiive-advanced", "iou", "scales"],
         help="Generation strategy"
+    ),
+    parser.add_argument(
+        "--perclass-conf-ious",
+        dest="perclass_conf_ious",
+        default="0.01,0.65,0.01,0.65,0.01,0.65,0.01,0.65",
+        type=str,
+        help="Per-class Conf and NMS IoUs (delimited by comma)"
     )
     parser.add_argument(
         "--scales",
@@ -197,6 +204,32 @@ def main(exp, args, num_gpu):
             is_distributed = is_distributed,
             batch_size = args.batch_size,
             half_precision = args.fp16
+        )
+        
+    elif args.strategy == 'naiive-advanced':
+        perclass_conf_ious = [float(v) for v in args.perclass_conf_ious.split(',')]
+        assert len(perclass_conf_ious) % 2 == 0, "--perclass-conf-ious only accepts a pair of conf_thresh, iou_thresh."
+        perclass_conf_ious = list(zip(perclass_conf_ious[::2], perclass_conf_ious[1::2]))
+        assert len(perclass_conf_ious) == exp.num_classes, "Provided perclass_conf_ious doesn't match count of classes"
+        
+        print("[naiive-advanced] Generating using following Confidence, NMS-IoU parameters")
+        for class_id, (conf_thresh, iou_thresh) in enumerate(perclass_conf_ious):
+            print("[naiive-advanced] Class {}: conf_thresh {:.02f} iou_thresh {:.02f}".format(class_id, conf_thresh, iou_thresh))
+        
+        assert '--nms' not in ' '.join(sys.argv), "--nms, --conf should be ignored."
+        assert '--conf' not in ' '.join(sys.argv), "--nms, --conf should be ignored."
+        assert '--scales' not in ' '.join(sys.argv), "scales should not be applied on current strategy."
+        assert '--generator-conf' not in ' '.join(sys.argv), "generator confidence should not be applied on current strategy."
+        assert '--generator-iou' not in ' '.join(sys.argv), "generator iou should not be applied on current strategy."
+        
+        generator = NaiiveAdvancedGenerator(
+            exp = exp,
+            model = model,
+            device = args.device,
+            is_distributed = is_distributed,
+            batch_size = args.batch_size,
+            half_precision = args.fp16,
+            perclass_conf_ious = perclass_conf_ious
         )
 
     elif args.strategy == 'iou':

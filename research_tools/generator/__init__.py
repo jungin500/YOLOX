@@ -3,4 +3,4 @@ from .dataset_generator import DatasetGenerator
 
 from .iou import IOUGenerator
 from .multiscale import MultiscaleGenerator
-from .naiive import NaiiveGenerator
+from .naiive import NaiiveGenerator, NaiiveAdvancedGenerator
