@@ -334,4 +334,5 @@ if __name__ == "__main__":
     else:
         main(exp, args)
 
+    print("File saved to {}".format(args.output_path))
     print("Done generating annotations, exiting ...")

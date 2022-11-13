@@ -276,6 +276,8 @@ def main(exp, args, num_gpu):
     perclass_f1_scores = []
     for category_id in sorted(np.unique(np.concatenate(list(gt_items.values()), 0)[:, 4])):
         f1_scores = []
+        precision_scores = []
+        recall_scores = []
 
         for threshold in tqdm(threshold_list, desc="Generating F1 score map"):
             tp = []  # Matched IoU over threshold
@@ -328,6 +330,9 @@ def main(exp, args, num_gpu):
                 precision = len(tp) / (len(tp) + len(fp))
                 recall = len(tp) / (len(tp) + len(fn))
 
+            precision_scores.append(precision)
+            recall_scores.append(recall)
+
             if precision + recall == 0:
                 f1_scores.append(.0)
             else:
@@ -356,10 +361,12 @@ def main(exp, args, num_gpu):
         max_threshold = threshold_list[np.argmax(f1_scores)]
         
         plt.figure(figsize=(8, 4))
-        plt.title("{} F1 Score by Detection Threshold".format(class_name))
-        f1_line, = plt.plot(threshold_list, f1_scores, color=color, linestyle='dashed', label="F1 Score ({})".format(class_name))
+        plt.title("{} F1 Score by Detection Threshold (NMS={:.02f})".format(class_name, exp.nmsthre))
+        f1_line, = plt.plot(threshold_list, f1_scores, color=color, linestyle='dashed', label="F1 Score")
+        precision_line, = plt.plot(threshold_list, precision_scores, color="#ff7f00", linestyle='dashed', label="Precision")
+        recall_line, = plt.plot(threshold_list, recall_scores, color="#007fff", linestyle='dashed', label="Recall")
         max_score_line = plt.axvline(max_threshold, color='r', linestyle='dashdot', label="Max score ({:.02f})".format(max_threshold))
-        plt.legend(handles=[f1_line, max_score_line], loc='upper right')
+        plt.legend(handles=[precision_line, recall_line, f1_line, max_score_line], loc='upper right')
         plt.xlabel("Confidence Threshold")
         plt.ylabel("F1 Score")
         plt.xlim(0.0, 1.0)
@@ -372,7 +379,7 @@ def main(exp, args, num_gpu):
         
     # Draw and save in single plot        
     plt.figure(figsize=(8, 4))
-    plt.title("F1 Score by Detection Threshold")
+    plt.title("F1 Score by Detection Threshold (NMS={:.02f})".format(exp.nmsthre))
     plt.xlabel("Confidence Threshold")
     plt.ylabel("F1 Score")
     plt.xlim(0.0, 1.0)
@@ -413,7 +420,7 @@ def main(exp, args, num_gpu):
     plt.legend(handles=[*all_lines, max_score_line], loc='upper right')
     plt.savefig(os.path.join(fig_savedir, "all.svg"), dpi=600, transparent=True)
         
-    logger.info("F1 plots are drawn into {}".format(file_name))
+    logger.info("F1 plots are drawn into {}".format(fig_savedir))
 
 
 if __name__ == "__main__":
