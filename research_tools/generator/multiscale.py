@@ -59,8 +59,8 @@ class MultiscaleGenerator(DatasetGenerator):
                 dataset_map[scale] = COCODataset(
                     data_dir=self.exp.data_dir,
                     json_file=self.exp.val_ann,
-                    name="val2017",
-                    img_size=self.exp.test_size,
+                    name="train2017",
+                    img_size=(scale, scale),
                     preproc=ValTransform(legacy=False),
                 )
 
@@ -85,15 +85,6 @@ class MultiscaleGenerator(DatasetGenerator):
             }
             dataloader_kwargs["batch_size"] = target_batch_size
             self.dataloader_map[scale] = torch.utils.data.DataLoader(dataset_map[scale], **dataloader_kwargs)
-
-    def ctx_predict(self, img: torch.Tensor, scale: int = 640) -> torch.Tensor:
-        with torch.no_grad():
-            outputs = self.models[scale](img)
-            outputs = postprocess(
-                outputs, self.exp.num_classes, self.exp.test_conf,
-                self.exp.nmsthre, class_agnostic=True
-            )
-        return outputs
 
     def generate_dataset(self):
         results = []
