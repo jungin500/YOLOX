@@ -4,7 +4,6 @@
 import argparse
 import os
 from loguru import logger
-from tqdm.auto import tqdm
 
 import cv2
 
@@ -13,6 +12,9 @@ import random
 import warnings
 import sys
 import json
+import glob
+import pickle
+import hashlib
 
 
 def make_parser():
@@ -21,7 +23,13 @@ def make_parser():
         "--shuffle",
         default=None,
         action='store_true',
-        help="Shuffle dataset (intend not to preserve its order)"
+        help="Shuffle dataset (intend not to preserve its order and/or comparing multiple datasets)"
+    )
+    parser.add_argument(
+        "--small",
+        default=None,
+        action='store_true',
+        help="Small visualization window (640x360)"
     )
     parser.add_argument("--seed", default=None, type=int, help="Shuffle seed for displaying same image")
     parser.add_argument("--save-recent", default=None, type=int, help="Save recent N items into output/ folder, named <annotation_filename>_XXXXX.jpg")
@@ -30,6 +38,12 @@ def make_parser():
         "coco_annotation",
         help="COCO annotation filename",
         default=None
+    )
+    parser.add_argument(
+        "ids",
+        default=None,
+        help="exclusive image id names to display",
+        nargs=argparse.REMAINDER
     )
     return parser
 
@@ -50,17 +64,63 @@ def main(args):
 
     if args.save_recent is None:
         vis_window_title = 'Dataset visualization'
-        cv2.namedWindow(vis_window_title)
+        cv2.namedWindow(vis_window_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
     
     logger.info("Loading annotation ...")
     with open(args.coco_annotation, 'r') as f:
         annotation = json.load(f)
     logger.info("Loaded {} images and {} annootations".format(len(annotation['images']), len(annotation['annotations'])))
+    
+    # Normalize image root string for proper cache filename hashing
+    image_root = image_root.strip()
+    if image_root[-1] == os.sep:
+        image_root = image_root[:-1]
+
+    cache_filename = 'imagelist.{}.cache'.format(hashlib.sha256(image_root.encode('utf-8')).hexdigest()[:8])
+    if not os.path.exists(cache_filename):
+        logger.info("Traversing filesystem for full image list ...")
+        image_list = glob.glob(os.path.join(image_root, '*.jpg'))
+        logger.info("Filtering out _D.jpg files ...")
+        image_list = list(sorted(filter(lambda filename: not filename.lower().endswith('_d.jpg'), image_list)))
+        
+        image_map = {Path(path).stem: path for path in image_list}
+        with open(cache_filename, 'wb') as f:
+            pickle.dump(image_map, f)
+
+        logger.info("Image map cached")
+        logger.info("- Images Path: {}".format(image_root))
+        logger.info("- Cache filename: {}".format(cache_filename))
+        logger.info("Cache is dependent on image path so it's safe to re-run when image path is changed")
+    else:
+        logger.info("Loading image list cache {} ...".format(cache_filename))
+        with open(cache_filename, 'rb') as f:
+            image_map = pickle.load(f)
+        image_list = [image_map[key] for key in sorted(image_map.keys())]
+    # 어찌되었든 image_list는 sort가 보장된 상태임
+    # -> shuffle의 입력으로는 무조건 같은 list가 들어갈 것임
+    
+    if args.ids:
+        logger.warning("Using image id list for displaying")
+        # Sanity check
+        for image_id in args.ids:
+            assert image_id in image_map, "Image {} not in image list!".format(image_id)
+        image_map = {image_id: image_map[image_id] for image_id in args.ids}
+        image_list = [image_map[key] for key in sorted(image_map.keys())]
+
+    if args.shuffle:
+        if args.ids:
+            logger.warning("Disabling shuffling while displaying with ids")
+        else:
+            logger.info("Shuffling items ...")
+            random.shuffle(image_list)
 
     logger.info("Mapping annotation ...")
     # Slowest implementation
     # bbox_map = { image['id']: list(filter(lambda item: item['image_id'] == image['id'], annotation['annotations'])) for image in tqdm(annotation['images'], "Creating image idmap for faster demo ...") }
     # Faster implementation
+    annotation_map = {}
+    for item in annotation['images']:
+        annotation_map[item['id']] = item
     bbox_map = { image['id']: [] for image in annotation['images'] }
     [bbox_map[item['image_id']].append(item) for item in annotation['annotations']]
     idmap = { category['id']: category['name'] for category in annotation['categories'] }
@@ -75,65 +135,97 @@ def main(args):
         4: (255, 255, 0),
     }
 
-    if args.shuffle:
-        logger.info("Shuffling dataset")
-        random.shuffle(annotation['images'])
-
     logger.info("Done, beginning visualization ...")
-    for idx, image_info in enumerate(annotation['images']):
-        image_path = os.path.join(image_root, image_info['id'] + '.jpg')
-        assert os.path.exists(image_path), "Image path \"{}\" not found.".format(image_path)
-
+    display_idx = 0
+    for image_path in image_list:
+        # assert os.path.exists(image_path), "Image path \"{}\" not found.".format(image_path)
+        image_id = Path(image_path).stem
         image = cv2.imread(image_path)
+        
+        # Display image name
+        cv2.rectangle(image, (0, 0), (480, 65), (0, 0, 0), -1)
+        cv2.putText(image, image_id, (18, 51), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 2)
 
-        for item in bbox_map[image_info['id']]:
-            xmin, ymin, width, height = item['bbox']
-            xmax, ymax = xmin + width, ymin + height
-            xmin, ymin, xmax, ymax = [int(i) for i in [xmin, ymin, xmax, ymax]]
-            class_name = idmap[item['category_id']]
-
-            cv2.rectangle(
-                image,
-                (xmin, ymin),
-                (xmax, ymax),
-                colormap[item['category_id']], 2
-            )
-
-            # y-clip
-            if ymin - 14 < 14:
-                ydraw = ymax + 27
-            else:
-                ydraw = ymin - 14
+        # Extra information string
+        extras = ''
+        if image_id in bbox_map:
             
-            # shadow effect (not for eye-candy!)
-            cv2.putText(
-                image,
-                class_name,
-                (xmin + 4, ydraw),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0, (0, 0, 0), 1
-            )
-            # real text
-            cv2.putText(
-                image,
-                class_name,
-                (xmin + 3, ydraw - 1),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0, colormap[item['category_id']], 1
-            )
+            for item in bbox_map[image_id]:
+                xmin, ymin, width, height = item['bbox']
+                xmax, ymax = xmin + width, ymin + height
+                xmin, ymin, xmax, ymax = [int(i) for i in [xmin, ymin, xmax, ymax]]
+                class_name = idmap[item['category_id']]
+                confidence = None
+                if 'det_confidence' in item:
+                    confidence = item['det_confidence']
 
+                cv2.rectangle(
+                    image,
+                    (xmin, ymin),
+                    (xmax, ymax),
+                    colormap[item['category_id']], 2
+                )
+
+                # y-clip
+                if ymin - 14 < 14:
+                    ydraw = ymax + 27
+                else:
+                    ydraw = ymin - 14
+                
+                # shadow effect (not for eye-candy!)
+                if confidence:
+                    class_name_text = '{} ({:.01f}%)'.format(class_name, confidence * 100)
+                else:
+                    class_name_text = class_name
+                cv2.putText(
+                    image,
+                    class_name_text,
+                    (xmin + 4, ydraw),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (0, 0, 0), 2
+                )
+                # real text
+                cv2.putText(
+                    image,
+                    class_name_text,
+                    (xmin + 3, ydraw - 1),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, colormap[item['category_id']], 2
+                )
+        else:
+            extras = '(No annotation)'
         if args.save_recent is None:
-            cv2.imshow(vis_window_title, image)
-            key = cv2.waitKey(0)
-            if key == 113:
+            if args.small:
+                # Ratio-perserve resizing
+                r_image = image.shape[0] / image.shape[1]  # H / W
+                window_size = (1280, int(1280 * r_image))
+                logger.debug("[{:04d}] Displaying: {} {}".format(display_idx, image_id, extras))
+                cv2.imshow(vis_window_title, cv2.resize(image, window_size))
+                cv2.resizeWindow(vis_window_title, window_size)
+            else:
+                cv2.imshow(vis_window_title, image)
+            if 'wait_forever' in dir(args) and args.wait_forever:
+                logger.info("Press q key on X window to exit")
+                key = None
+                while key != 113:
+                    key = cv2.waitKey(0)
                 logger.info("Stopping viewer")
                 break
+            else:
+                key = cv2.waitKey(0)
+                if key == 113:
+                    logger.info("Stopping viewer")
+                break
         else:
-            cv2.imwrite()
+            if not os.path.exists("outputs"):
+                os.makedirs("outputs", exist_ok=True)
+            cv2.imwrite(os.path.join("outputs", image_id + ".jpg"), image)
 
             items_to_save = args.save_recent
-            if items_to_save <= idx:
+            if items_to_save <= display_idx:
                 break
+            
+        display_idx += 1
 
 if __name__ == "__main__":
     args = make_parser().parse_args()
