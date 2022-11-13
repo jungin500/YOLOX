@@ -88,7 +88,7 @@ def make_parser():
         dest="strategy",
         default="naiive",
         type=str,
-        choices=["naiive", "naiive-advanced", "iou", "scales"],
+        choices=["naiive", "naiive-advanced", "iou", "scales", "scales-simple"],
         help="Generation strategy"
     ),
     parser.add_argument(
@@ -267,6 +267,24 @@ def main(exp, args, num_gpu):
             oneshot_image_ids = oneshot_image_ids
         )
         
+    elif args.strategy == 'scales-simple':
+        assert args.tsize == None, "tsize cannot be applied on scale strategy. use scales argument."
+        assert '--generator-conf' not in ' '.join(sys.argv), "generator confidence should not be applied on current strategy."
+        assert '--generator-iou' not in ' '.join(sys.argv), "generator iou should not be applied on current strategy."
+        print("[scales-simple] Inferring using Confidence {:.2f} and NMS-IoU {:.2f}".format(args.conf, args.nms))
+        print("[scales-simple] Scale list: {}".format(str(scales)))
+        generator = SimpleMultiscaleGenerator(
+            exp = exp,
+            model = model,
+            scales = scales,
+            conf = args.generator_conf,
+            device = args.device,
+            is_distributed = is_distributed,
+            batch_size = args.batch_size,
+            half_precision = args.fp16,
+            oneshot_image_ids = oneshot_image_ids
+        )
+
     else:
         raise NotImplementedError("Strategy type {} not implemented".format(args.strategy))
 
