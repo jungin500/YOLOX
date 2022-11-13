@@ -23,11 +23,11 @@ class DatasetGenerator(object):
         self.half_precision = half_precision
         self.oneshot_image_ids = oneshot_image_ids
         
-        self._load_coco_annotations(os.path.join(exp.data_dir, 'annotations', exp.val_ann))
+        self._load_coco_annotations(os.path.join(exp.data_dir, 'annotations', exp.train_ann))
         if self.oneshot_image_ids:
             # Manipulate JSON to only have requested single image
             logger.info('Loading JSON and filtering {} annotation(s) ...'.format(len(self.oneshot_image_ids)))
-            with open(os.path.join(self.exp.data_dir, "annotations", self.exp.val_ann), 'r') as f:
+            with open(os.path.join(self.exp.data_dir, "annotations", self.exp.train_ann), 'r') as f:
                 body = json.load(f)
             
             new_body = {
@@ -45,7 +45,7 @@ class DatasetGenerator(object):
                 json.dump(new_body, f)
             
             # Exploit exp!
-            self.exp.val_ann = tmp_json_filename
+            self.exp.train_ann = tmp_json_filename
             
     def _load_coco_annotations(self, annotation_path):
         # Load COCO annotation

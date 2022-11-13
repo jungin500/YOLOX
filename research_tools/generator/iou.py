@@ -63,7 +63,7 @@ class IOUGenerator(DatasetGenerator):
         with wait_for_the_master(get_local_rank()):
             dataset = COCODataset(
                 data_dir=self.exp.data_dir,
-                json_file=self.exp.val_ann,
+                json_file=self.exp.train_ann,
                 name="train2017",
                 img_size=self.exp.test_size,
                 preproc=ValTransform(legacy=False),

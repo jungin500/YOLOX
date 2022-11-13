@@ -62,7 +62,7 @@ class MultiscaleGenerator(DatasetGenerator):
             with wait_for_the_master(get_local_rank()):
                 dataset_map[scale] = COCODataset(
                     data_dir=self.exp.data_dir,
-                    json_file=self.exp.val_ann,
+                    json_file=self.exp.train_ann,
                     name="train2017",
                     img_size=(scale, scale),
                     preproc=ValTransform(legacy=False),
@@ -579,7 +579,7 @@ class SimpleMultiscaleGenerator(DatasetGenerator):
             with wait_for_the_master(get_local_rank()):
                 dataset_map[scale] = COCODataset(
                     data_dir=self.exp.data_dir,
-                    json_file=self.exp.val_ann,
+                    json_file=self.exp.train_ann,
                     name="train2017",
                     img_size=(scale, scale),
                     preproc=ValTransform(legacy=False),

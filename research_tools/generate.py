@@ -160,7 +160,7 @@ def main(exp, args, num_gpu):
     exp.data_num_workers = 0
     
     logger.info("Exp:\n{}".format(exp))
-    logger.info("Args: {}".format(args))
+    logger.info("Args (Nonused parameters preserved): {}".format(args))
 
     model = exp.get_model()
     logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
