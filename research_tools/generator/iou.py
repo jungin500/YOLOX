@@ -36,7 +36,8 @@ class IOUGenerator(DatasetGenerator):
         device,
         is_distributed,
         batch_size,
-        half_precision
+        half_precision,
+        oneshot_image_ids = None,
     ):
         super().__init__(
             exp = exp,
@@ -44,7 +45,8 @@ class IOUGenerator(DatasetGenerator):
             device = device,
             is_distributed = is_distributed,
             batch_size = batch_size,
-            half_precision = half_precision
+            half_precision = half_precision,
+            oneshot_image_ids = oneshot_image_ids
         )
         self.conf_thresh = conf
         self.iou_thresh = iou_thresh
@@ -62,7 +64,7 @@ class IOUGenerator(DatasetGenerator):
             dataset = COCODataset(
                 data_dir=self.exp.data_dir,
                 json_file=self.exp.val_ann,
-                name="val2017",
+                name="train2017",
                 img_size=self.exp.test_size,
                 preproc=ValTransform(legacy=False),
             )
@@ -174,6 +176,7 @@ class IOUGenerator(DatasetGenerator):
         infer_nonmatched_objects = {}
         gt_nonmatched_objects = {}
 
+        # 클래스별 IoU 매칭
         for target_cls in np.unique(cls):
             target_cls_idxname = int(target_cls)
             matched_objects[target_cls_idxname] = []

@@ -6,10 +6,14 @@
 # 각 Training Scale별 결과를 모아서 데이터를 구축한다.
 #   Naiive, IoU strategy에서는 argument를 활용하며,
 #   Scales strategy에서는 구축할 Scale이 args.scales에 정의되어 있다.
+# 
+# -i, -ids를 이용하면 주어진 ID만  이미지를 생성한 다음 X11 화면으로 보여준다.
+# demo_ds_coco에 있는 visualization 기능을 활용한다.
 #
 
 import argparse
 from loguru import logger
+import cv2
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -17,7 +21,7 @@ import torch.distributed as dist
 from yolox.core.launch import launch
 
 from yolox.exp import get_exp
-from yolox.utils import fuse_model, get_model_info
+from yolox.utils import get_model_info
 
 from yolox.utils.dist import get_local_rank, get_local_size
 from yolox.utils.setup_env import configure_module, configure_nccl
@@ -26,7 +30,8 @@ import warnings
 import random
 import sys
 
-from generator import NaiiveGenerator, NaiiveAdvancedGenerator, MultiscaleGenerator, IOUGenerator
+from generator import NaiiveGenerator, NaiiveAdvancedGenerator, MultiscaleGenerator, IOUGenerator, SimpleMultiscaleGenerator
+import tempfile
 import json
 import os
 
@@ -47,50 +52,29 @@ def make_parser():
     )
     parser.add_argument("-c", "--ckpt", default=None, required=True, type=str, help="ckpt for inference")
     parser.add_argument(
-        "--device",
-        default="cpu",
-        type=str,
-        help="device to run our model, can either be cpu or gpu",
-    )
-    parser.add_argument(
         "--gpus",
         type=int,
         default=0,
         help="number of gpus to generate dataset",
     )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        type=str,
+        help="device to run our model, can either be cpu or gpu",
+    )
+    parser.add_argument("-b", "--batch-size", default=64, type=int, help="batch size")
     parser.add_argument("--conf", default=0.01, type=float, help="test conf")
     parser.add_argument("--nms", default=0.65, type=float, help="test nms threshold")
     parser.add_argument("--tsize", default=None, type=int, help="test img size")
     parser.add_argument("--generator-conf", default=0.45, type=float, help="generator conf")
     parser.add_argument("--generator-iou", default=0.3, type=float, help="generator iou threshold")
-    parser.add_argument("-b", "--batch-size", default=64, type=int, help="batch size")
     parser.add_argument(
         "--fp16",
         dest="fp16",
         default=False,
         action="store_true",
         help="Adopting mix precision evaluating.",
-    )
-    parser.add_argument(
-        "--legacy",
-        dest="legacy",
-        default=False,
-        action="store_true",
-        help="To be compatible with older versions",
-    )
-    parser.add_argument(
-        "--fuse",
-        dest="fuse",
-        default=False,
-        action="store_true",
-        help="Fuse conv and bn for testing.",
-    )
-    parser.add_argument(
-        "--devel",
-        dest="devel",
-        default=False,
-        action="store_true",
-        help="Enable fast-development environment",
     )
     parser.add_argument(
         "--rematch-thresh",
@@ -122,6 +106,13 @@ def make_parser():
         help="Scales (delimited by comma)"
     )
     parser.add_argument("--seed", default=None, type=int, help="Evaluation seed")
+    parser.add_argument(
+        "-i",
+        "--id",
+        dest="image_ids",
+        help="Input image ids to generate (separated by comma)",
+        default=None,
+    )
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
@@ -155,19 +146,21 @@ def main(exp, args, num_gpu):
     configure_nccl()
     rank = get_local_rank()
 
-    logger.info("Args: {}".format(args))
-
     if args.conf is not None:
         exp.test_conf = args.conf
     if args.nms is not None:
         exp.nmsthre = args.nms
     if args.tsize is not None:
         exp.test_size = (args.tsize, args.tsize)
-
     if args.nms is not None:
         exp.nmsthre = args.nms
+    if args.seed is not None:
+        exp.seed = args.seed
+    logger.info("Forcing data_num_workers to 0")
+    exp.data_num_workers = 0
     
     logger.info("Exp:\n{}".format(exp))
+    logger.info("Args: {}".format(args))
 
     model = exp.get_model()
     logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
@@ -186,10 +179,15 @@ def main(exp, args, num_gpu):
     # load the model state dict
     model.load_state_dict(ckpt["model"])
     logger.info("loaded checkpoint done.")
-
-    if args.fuse:
-        logger.info("\tFusing model...")
-        model = fuse_model(model)
+    
+    oneshot_image_ids = None
+    if args.image_ids:
+        assert args.batch_size == 1, "Batch size must be 1 to generate with image_ids."
+        oneshot_image_ids = args.image_ids.split(',')
+        
+        # 혹시나 X11 문제를 나중에 알면 실험이 길어지니까
+        vis_window_title = 'Dataset visualization'
+        cv2.namedWindow(vis_window_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
 
     # Generate annotation with given model
     if args.strategy == 'naiive':
@@ -203,7 +201,8 @@ def main(exp, args, num_gpu):
             device = args.device,
             is_distributed = is_distributed,
             batch_size = args.batch_size,
-            half_precision = args.fp16
+            half_precision = args.fp16,
+            oneshot_image_ids = oneshot_image_ids
         )
         
     elif args.strategy == 'naiive-advanced':
@@ -229,7 +228,8 @@ def main(exp, args, num_gpu):
             is_distributed = is_distributed,
             batch_size = args.batch_size,
             half_precision = args.fp16,
-            perclass_conf_ious = perclass_conf_ious
+            perclass_conf_ious = perclass_conf_ious,
+            oneshot_image_ids = oneshot_image_ids
         )
 
     elif args.strategy == 'iou':
@@ -244,7 +244,8 @@ def main(exp, args, num_gpu):
             device = args.device,
             is_distributed = is_distributed,
             batch_size = args.batch_size,
-            half_precision = args.fp16
+            half_precision = args.fp16,
+            oneshot_image_ids = oneshot_image_ids
         )
         
     elif args.strategy == 'scales':
@@ -262,55 +263,80 @@ def main(exp, args, num_gpu):
             device = args.device,
             is_distributed = is_distributed,
             batch_size = args.batch_size,
-            half_precision = args.fp16
+            half_precision = args.fp16,
+            oneshot_image_ids = oneshot_image_ids
         )
-
+        
     else:
         raise NotImplementedError("Strategy type {} not implemented".format(args.strategy))
 
     generator.init()
     coco_result = generator.generate_dataset()
 
-    if not is_distributed:
-        # Save result with single file
-        with open(args.output_path, 'w') as f:
+    if args.image_ids:
+        # 결과 표출 (임시 JSON 파일 활용)
+        fp, fileloc = tempfile.mkstemp(suffix=".json")
+        with open(fp, 'w') as f:
             json.dump(coco_result, f)
+        
+        # demo_ds_coco 실행
+        from demo_ds_coco import make_parser as demo_make_parser
+        from demo_ds_coco import main as demo_ds_coco
+        demo_ds_args = demo_make_parser().parse_args([
+            '--seed', str(args.seed),
+            '--image-root', os.path.join(exp.data_dir, 'train2017'),
+            fileloc,
+            *oneshot_image_ids
+        ])
+        logger.info("Beginning demo display")
+        demo_ds_coco(demo_ds_args)
     else:
-        # Save each rank into separate file
-        with open(args.output_path + '.r{}.tmp'.format(rank), 'w') as f:
-            json.dump(coco_result, f)
-
-        # Merge all rank's result into single json file
-        dist.barrier()  # Make sure all rank wrote json file
-        
-        if rank == 0:
-            # Do tasks on master rank
-            all_annotations = []
-            for another_rank_id in range(get_local_size()):
-                with open(args.output_path + '.r{}.tmp'.format(another_rank_id)) as f:
-                    all_annotations.append(json.load(f))
-            
-            # Sanity check
-            assert len(all_annotations) > 0, "Empty annotation?"
-            for idx, annotation in enumerate(all_annotations):
-                json_filename = args.output_path + '.r{}.tmp'.format(idx)
-                assert len(annotation["images"]) > 0, "Empty images in file {}".format(json_filename)
-                assert len(annotation["annotations"]) > 0, "Empty annotations in file {}".format(json_filename)
-            assert len(set([json.dumps(annotation["categories"]) for annotation in all_annotations])) == 1, \
-                "Different categories between annotations!"
-            
-            # Merge annotations
-            result_annotation = merge_coco(all_annotations)
-            
-            # Save result annotation and remove each rank's artifacts
+        # 결과 저장
+        if not is_distributed:
+            # Save result with single file
             with open(args.output_path, 'w') as f:
-                json.dump(result_annotation, f)
+                json.dump(coco_result, f)
+        else:
+            # Save each rank into separate file
+            with open(args.output_path + '.r{}.tmp'.format(rank), 'w') as f:
+                json.dump(coco_result, f)
+
+            # Merge all rank's result into single json file
+            dist.barrier()  # Make sure all rank wrote json file
+            
+            if rank == 0:
+                # Do tasks on master rank
+                all_annotations = []
+                for another_rank_id in range(get_local_size()):
+                    with open(args.output_path + '.r{}.tmp'.format(another_rank_id)) as f:
+                        all_annotations.append(json.load(f))
                 
-            for another_rank_id in range(get_local_size()):
-                os.unlink(args.output_path + '.r{}.tmp'.format(another_rank_id))
+                # Sanity check
+                assert len(all_annotations) > 0, "Empty annotation?"
+                for idx, annotation in enumerate(all_annotations):
+                    json_filename = args.output_path + '.r{}.tmp'.format(idx)
+                    assert len(annotation["images"]) > 0, "Empty images in file {}".format(json_filename)
+                    assert len(annotation["annotations"]) > 0, "Empty annotations in file {}".format(json_filename)
+                assert len(set([json.dumps(annotation["categories"]) for annotation in all_annotations])) == 1, \
+                    "Different categories between annotations!"
+                
+                # Merge annotations
+                result_annotation = merge_coco(all_annotations)
+                
+                # Save result annotation and remove each rank's artifacts
+                with open(args.output_path, 'w') as f:
+                    json.dump(result_annotation, f)
+                    
+                for another_rank_id in range(get_local_size()):
+                    os.unlink(args.output_path + '.r{}.tmp'.format(another_rank_id))
+            
+            # Synchronize until master worker works hard ;)    
+            dist.barrier()
+
+        logger.info("File saved to {}".format(args.output_path))
         
-        # Synchronize until master worker works hard ;)    
-        dist.barrier()
+    logger.info("Done generating annotations, exiting ...")
+
 
 if __name__ == "__main__":
     configure_module()
@@ -333,6 +359,3 @@ if __name__ == "__main__":
         )
     else:
         main(exp, args)
-
-    print("File saved to {}".format(args.output_path))
-    print("Done generating annotations, exiting ...")

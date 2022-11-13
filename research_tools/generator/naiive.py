@@ -1,6 +1,7 @@
 import torch
 import json
 from tqdm.auto import tqdm
+from loguru import logger
 
 from yolox.utils import postprocess
 from yolox.utils.dist import get_local_rank, get_world_size, wait_for_the_master
@@ -16,14 +17,13 @@ class NaiiveGenerator(DatasetGenerator):
             COCODataset
         )
         import torch.distributed as dist
-        from loguru import logger
     
         logger.info('Initializing dataloader ...')
         with wait_for_the_master(get_local_rank()):
             dataset = COCODataset(
                 data_dir=self.exp.data_dir,
                 json_file=self.exp.val_ann,
-                name="val2017",
+                name="train2017",
                 img_size=self.exp.test_size,
                 preproc=ValTransform(legacy=False),
             )
@@ -103,6 +103,7 @@ class NaiiveGenerator(DatasetGenerator):
                     'iscrowd': 0,
                     'bbox': bbox,
                     'category_id': int(classid2cocoid(cls)),
+                    'det_confidence': float(score),
                     'ignore': 0,
                     'segmentation': [],
                     'image_id': image_id,
@@ -126,7 +127,8 @@ class NaiiveAdvancedGenerator(NaiiveGenerator):
         is_distributed,
         batch_size,
         half_precision,
-        perclass_conf_ious
+        perclass_conf_ious,
+        oneshot_image_ids = None
     ):
         super().__init__(
             exp=exp,
@@ -135,6 +137,7 @@ class NaiiveAdvancedGenerator(NaiiveGenerator):
             is_distributed=is_distributed,
             batch_size=batch_size,
             half_precision=half_precision,
+            oneshot_image_ids=oneshot_image_ids
         )
         
         self.perclass_conf_ious = perclass_conf_ious
@@ -223,6 +226,7 @@ class NaiiveAdvancedGenerator(NaiiveGenerator):
                     'iscrowd': 0,
                     'bbox': bbox,
                     'category_id': int(classid2cocoid(cls)),
+                    'det_confidence': score,
                     'ignore': 0,
                     'segmentation': [],
                     'image_id': image_id,

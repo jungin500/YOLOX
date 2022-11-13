@@ -42,7 +42,7 @@ def make_parser():
     parser.add_argument(
         "ids",
         default=None,
-        help="exclusive image id names to display",
+        help="exclusive image id name to display",
         nargs=argparse.REMAINDER
     )
     return parser
@@ -204,17 +204,10 @@ def main(args):
                 cv2.resizeWindow(vis_window_title, window_size)
             else:
                 cv2.imshow(vis_window_title, image)
-            if 'wait_forever' in dir(args) and args.wait_forever:
-                logger.info("Press q key on X window to exit")
-                key = None
-                while key != 113:
-                    key = cv2.waitKey(0)
+                
+            key = cv2.waitKey(0)
+            if key == 113:
                 logger.info("Stopping viewer")
-                break
-            else:
-                key = cv2.waitKey(0)
-                if key == 113:
-                    logger.info("Stopping viewer")
                 break
         else:
             if not os.path.exists("outputs"):

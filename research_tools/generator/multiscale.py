@@ -23,7 +23,8 @@ class MultiscaleGenerator(DatasetGenerator):
         device,
         is_distributed,
         batch_size,
-        half_precision
+        half_precision,
+        oneshot_image_ids = None,
     ):
         super().__init__(
             exp = exp,
@@ -31,7 +32,8 @@ class MultiscaleGenerator(DatasetGenerator):
             device = device,
             is_distributed = is_distributed,
             batch_size = batch_size,
-            half_precision = half_precision
+            half_precision = half_precision,
+            oneshot_image_ids = oneshot_image_ids
         )
         self.scales = scales
         self.conf_thresh = conf
