@@ -127,9 +127,9 @@ class MultiscaleGenerator(DatasetGenerator):
                     image_id = img_id[batch_idx]
 
                     if output is None:
-                        all_bboxes[image_id] = []
-                        all_clses[image_id] = []
-                        all_scores[image_id] = []
+                        all_bboxes[image_id] = np.array([])
+                        all_clses[image_id] = np.array([])
+                        all_scores[image_id] = np.array([])
                         continue
 
                     ratio = min(scale / img_info[0][batch_idx], scale / img_info[1][batch_idx])
@@ -216,10 +216,10 @@ class MultiscaleGenerator(DatasetGenerator):
             cls = cls_scales[scale]
             scores = scores_scales[scale]
 
-            if np.all(bboxes == None):
+            if len(scores) == 0:
                 continue
             
-            scoremap = np.where(np.array(scores) > self.conf_thresh)
+            scoremap = np.where(scores > self.conf_thresh)
             bboxes = bboxes[scoremap]
             cls = cls[scoremap]
             scores = scores[scoremap]
