@@ -156,9 +156,7 @@ def main(exp, args, num_gpu):
         exp.nmsthre = args.nms
     if args.seed is not None:
         exp.seed = args.seed
-    logger.info("Forcing data_num_workers to 0")
-    exp.data_num_workers = 0
-    
+
     logger.info("Exp:\n{}".format(exp))
     logger.info("Args (Nonused parameters preserved): {}".format(args))
 
@@ -182,6 +180,9 @@ def main(exp, args, num_gpu):
     
     oneshot_image_ids = None
     if args.image_ids:
+        logger.info("Forcing data_num_workers to 0")
+        exp.data_num_workers = 0
+    
         assert args.batch_size == 1, "Batch size must be 1 to generate with image_ids."
         oneshot_image_ids = args.image_ids.split(',')
         

@@ -8,9 +8,10 @@ from yolox.utils import postprocess
 from yolox.utils.dist import get_local_rank, get_world_size, wait_for_the_master
 
 from .dataset_generator import DatasetGenerator
-from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np
+from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np, ValDataPrefetcher
 
 import torchvision
+from loguru import logger
 
 
 class MultiscaleGenerator(DatasetGenerator):
@@ -30,7 +31,7 @@ class MultiscaleGenerator(DatasetGenerator):
     ):
         super().__init__(
             exp = exp,
-            model = None,  # manual assignment
+            model = model,  # manual assignment
             device = device,
             is_distributed = is_distributed,
             batch_size = batch_size,
@@ -41,10 +42,6 @@ class MultiscaleGenerator(DatasetGenerator):
         self.conf_thresh = conf
         self.iou_thresh = iou_thresh
         self.rematch_thresh = rematch_thresh
-
-        self.models = {}
-        for scale in scales:
-            self.models[scale] = deepcopy(model)
 
     def init(self):
         from yolox.data import (
@@ -88,30 +85,89 @@ class MultiscaleGenerator(DatasetGenerator):
                 "collate_fn": collate_fn,
             }
             dataloader_kwargs["batch_size"] = target_batch_size
+
             self.dataloader_map[scale] = torch.utils.data.DataLoader(dataset_map[scale], **dataloader_kwargs)
 
     def generate_dataset(self):
+        # Scale별로 한번에 Generate한 다음 합친다.
+        # 큰 스케일부터 생성한다 (Late OOM 문제 발생 가능할 수 있으므로)
+        boxes_scales = {}
+        clses_scales = {}
+        scores_scales = {}
+        image_names = set()
+        for scale in reversed(sorted(self.scales)):
+            all_bboxes = {}
+            all_clses = {}
+            all_scores = {}
+            
+            if self.is_distributed:
+                desc_msg = "[Rank {}] Inferencing scale {}".format(get_local_rank(), scale)
+            else:
+                desc_msg = "Inferencing scale {}".format(scale)
+
+            prefetcher = ValDataPrefetcher(self.dataloader_map[scale])
+            pbar = tqdm(range(len(self.dataloader_map[scale])), desc=desc_msg)
+            while True:
+                img, target, img_info, img_id = prefetcher.next()
+                if type(img) == type(None):
+                    break  # End of prefetcher
+
+                if self.half_precision:
+                    img = img.to(torch.float16)
+
+                # Infer current scale
+                with torch.no_grad():
+                    batched_outputs = self.model(img)
+                    batched_outputs = postprocess(
+                        batched_outputs, self.exp.num_classes, self.exp.test_conf,
+                        self.exp.nmsthre, class_agnostic=True
+                    )
+
+                for batch_idx, output in enumerate(batched_outputs):
+                    image_id = img_id[batch_idx]
+
+                    if output is None:
+                        all_bboxes[image_id] = []
+                        all_clses[image_id] = []
+                        all_scores[image_id] = []
+                        continue
+
+                    ratio = min(scale / img_info[0][batch_idx], scale / img_info[1][batch_idx])
+
+                    bboxes = output[:, 0:4]
+                    # preprocessing: resize
+                    bboxes /= ratio
+                    cls = output[:, 6]
+                    scores = output[:, 4] * output[:, 5]
+
+                    all_bboxes[image_id] = bboxes.cpu().numpy()
+                    all_clses[image_id] = cls.cpu().numpy().astype(int)
+                    all_scores[image_id] = scores.cpu().numpy()
+
+                pbar.update()
+
+            boxes_scales[scale] = all_bboxes
+            clses_scales[scale] = all_clses
+            scores_scales[scale] = all_scores
+            image_names.update(list(all_bboxes.keys()))
+
+        # 각 image_id에 대해 multiscale_match 수행
         results = []
-        
-        if self.is_distributed:
-            desc_msg = "[Rank {}] Inferencing".format(get_local_rank())
-        else:
-            desc_msg = "Inferencing"
+        for image_id in sorted(list(image_names)):
+            boxes_allscale = { scale: boxes_scales[scale][image_id] for scale in self.scales if image_id in boxes_scales[scale] }
+            clses_allscale = { scale: clses_scales[scale][image_id] for scale in self.scales if image_id in clses_scales[scale] }
+            scores_allscale = { scale: scores_scales[scale][image_id] for scale in self.scales if image_id in scores_scales[scale] }
 
-        iterators = { scale: iter(self.dataloader_map[scale]) for scale in self.scales }
-        for total_batch_idx in tqdm(range(len(self.dataloader_map[next(iter(self.scales))])), desc=desc_msg):
-            bboxes_batched, cls_batched, scores_batched, image_names = self.infer_batch(iterators)
-
-            for batch_idx in range(len(bboxes_batched)):
+            for batch_idx in range(len(boxes_allscale)):
                 matched_objects, gt_nonmatched_objects, infer_nonmatched_objects = self.multiscale_match(
-                    image_name = image_names[batch_idx],
-                    bboxes_scales = bboxes_batched[batch_idx],
-                    cls_scales = cls_batched[batch_idx],
-                    scores_scales = scores_batched[batch_idx],
+                    bboxes_scales = boxes_allscale,
+                    cls_scales = clses_allscale,
+                    scores_scales = scores_allscale,
+                    image_name = image_id,
                 )
 
-                results.append([image_names[batch_idx], matched_objects])
-        
+                results.append([image_id, matched_objects])
+
         # JSON Annotation 저장하기
         images_map = { item['id']: item for item in self.annotations['images'] }
         result_annotations = []
@@ -140,7 +196,11 @@ class MultiscaleGenerator(DatasetGenerator):
         }
 
     def multiscale_match(self, image_name, bboxes_scales, cls_scales, scores_scales):
-        o_items = self.annotation_map[image_name]
+        if image_name not in self.annotation_map:
+            # 어노테이션 없는 빈 이미지 (Background)
+            o_items = []
+        else:
+            o_items = self.annotation_map[image_name]
 
         o_cls = np.array(list(map(lambda item : cocoid2classid(item['category_id']), o_items))).astype(int)
         o_bboxes = np.array(list(map(lambda item : item['bbox'], o_items)))
@@ -396,146 +456,65 @@ class MultiscaleGenerator(DatasetGenerator):
 
         return match_table_all, gt_only_bbox_table_all, infer_only_bbox_table_all
 
-    def infer_batch(self, iterators):
-        # Per-scale inference
-        bboxes_batched = []
-        cls_batched = []
-        scores_batched = []
-        image_names = []
-        for scale_idx, scale in enumerate(self.scales):
-            try:
-                img, target, img_info, img_id = next(iterators[scale])
-            except StopIteration:
-                print("StopIteartion occured")
-                continue
 
-            if self.device == 'gpu':
-                img = img.cuda()
-            if self.half_precision:
-                img = img.half()
+def postprocess_before_nms(prediction, scale, img_info, num_classes, conf_thre=0.7, class_agnostic=False):
+    box_corner = prediction.new(prediction.shape)
+    box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+    box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+    box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+    box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
+    prediction[:, :, :4] = box_corner[:, :, :4]
 
-            # Infer current scale
-            with torch.no_grad():
-                batched_outputs = self.models[scale](img)
-                batched_outputs = postprocess(
-                    batched_outputs, self.exp.num_classes, self.exp.test_conf,
-                    self.exp.nmsthre, class_agnostic=True
-                )
+    bboxes = []
+    scores = []
+    all_detections = []
+    idxs = []
+    for i, image_pred in enumerate(prediction):
 
-            for batch_idx, output in enumerate(batched_outputs):
-                if scale_idx == 0:
-                    bboxes_batched.append({})
-                    cls_batched.append({})
-                    scores_batched.append({})
-                    image_names.append(img_id[batch_idx])
+        # If none are remaining => process next image
+        if not image_pred.size(0):
+            bboxes.append([])
+            scores.append([])
+            if not class_agnostic: idxs.append([])
+            continue
+        # Get score and class with highest confidence
+        class_conf, class_pred = torch.max(image_pred[:, 5: 5 + num_classes], 1, keepdim=True)
 
-                if output is None:
-                    bboxes_batched[batch_idx][scale] = None
-                    cls_batched[batch_idx][scale] = None
-                    scores_batched[batch_idx][scale] = None
-                    continue
+        conf_mask = (image_pred[:, 4] * class_conf.squeeze() >= conf_thre).squeeze()
+        # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
+        detections = torch.cat((image_pred[:, :5], class_conf, class_pred.float()), 1)
+        detections = detections[conf_mask]
+        if not detections.size(0):
+            bboxes.append([])
+            scores.append([])
+            if not class_agnostic: idxs.append([])
+            continue
 
-                ratio = min(scale / img_info[0][batch_idx], scale / img_info[1][batch_idx])
+        # postprocessing: resize
+        ratio = min(scale / img_info[0][i], scale / img_info[1][i])
+        detections[:, :4] /= ratio
 
-                bboxes = output[:, 0:4]
-                # preprocessing: resize
-                bboxes /= ratio
-                cls = output[:, 6]
-                scores = output[:, 4] * output[:, 5]
-
-                bboxes_batched[batch_idx][scale] : np.ndarray = bboxes.cpu().numpy()
-                cls_batched[batch_idx][scale] : np.ndarray = cls.cpu().numpy().astype(int)
-                scores_batched[batch_idx][scale] : np.ndarray = scores.cpu().numpy()
-        
-        return bboxes_batched, cls_batched, scores_batched, image_names
-
-
-# 기존에는 bbox를 scale로 나누는 것을 nms 이후에 진행하였으나
-# 여기서는 NMS 이전에 scale 나누어주기를 수행함
-# (여러 Scale이 한 NMS 함수에 입력되기 때문)
-def multiscale_postprocess(predictions, scales, img_info, num_classes, conf_thre=0.7, nms_thre=0.45, class_agnostic=False):
-    assert len(predictions) == len(scales), "Image predictions are not matched by scale list"
-
-    predictions = deepcopy(predictions)
-    
-    for prediction in predictions:
-        box_corner = prediction.new(prediction.shape)
-        box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
-        box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
-        box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
-        box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
-        prediction[:, :, :4] = box_corner[:, :, :4]
-
-    output = [None for _ in range(len(predictions[0]))]
-    for batch_idx in range(predictions[0].shape[0]):
-        # Current batch items
-        image_preds = [item[batch_idx] for item in predictions]
-        
-        all_dets = []
-        boxes = []
-        scores = []
-        idxs = []
-        
-        for scale_idx, image_pred in enumerate(image_preds):
-            # If none are remaining => process next image
-            if not image_pred.size(0):
-                dev = image_pred.device
-                boxes.append(torch.Tensor([]).to(dev))
-                scores.append(torch.Tensor([]).to(dev))
-                if not class_agnostic: idxs.append(torch.Tensor([]).to(dev))
-                continue
-            
-            # Get score and class with highest confidence
-            class_conf, class_pred = torch.max(image_pred[:, 5: 5 + num_classes], 1, keepdim=True)
-
-            conf_mask = (image_pred[:, 4] * class_conf.squeeze() >= conf_thre).squeeze()
-            # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
-            detections = torch.cat((image_pred[:, :5], class_conf, class_pred.float()), 1)
-            detections = detections[conf_mask]
-            if not detections.size(0):
-                dev = detections.device
-                boxes.append(torch.Tensor([]).to(dev))
-                scores.append(torch.Tensor([]).to(dev))
-                if not class_agnostic: idxs.append(torch.Tensor([]).to(dev))
-                continue
-
-            # postprocessing: resize
-            scale = scales[scale_idx]
-            ratio = min(scale / img_info[0][batch_idx], scale / img_info[1][batch_idx])
-            detections[:, :4] /= ratio
-            
-            all_dets.append(detections)
-            boxes.append(detections[:, :4])
-            scores.append(detections[:, 4] * detections[:, 5])
-            if not class_agnostic: idxs.append(detections[:, 6])
-            
-        all_dets = torch.cat(all_dets, dim=0)
-        boxes = torch.cat(boxes, dim=0)
-        scores = torch.cat(scores, dim=0)
+        all_detections.append(detections)
+        bboxes.append(detections[:, :4])
+        scores.append(detections[:, 4] * detections[:, 5])
         if not class_agnostic:
-            idxs = torch.cat(idxs, dim=0)
+            idxs.append(detections[:, 6])
 
-        if class_agnostic:
-            nms_out_index = torchvision.ops.nms(
-                boxes,
-                scores,
-                nms_thre,
-            )
-        else:
-            nms_out_index = torchvision.ops.batched_nms(
-                boxes,
-                scores,
-                idxs,
-                nms_thre,
-            )
+    if class_agnostic:
+        return all_detections, bboxes, scores
+    else:
+        return all_detections, bboxes, scores, idxs
 
-        all_dets = all_dets[nms_out_index]
-        if output[batch_idx] is None:
-            output[batch_idx] = all_dets
-        else:
-            output[batch_idx] = torch.cat((output[batch_idx], all_dets))
 
-    return output
+def postprocess_after_nms(all_detections, bboxes, scores, idxs=None, nms_thre=0.45, class_agnostic=True):
+    if class_agnostic:
+        nms_out_index = torchvision.ops.nms(bboxes, scores, nms_thre)
+    else:
+        nms_out_index = torchvision.ops.batched_nms(bboxes, scores, idxs)
+
+    detections = all_detections[nms_out_index]
+
+    return detections
 
 
 class SimpleMultiscaleGenerator(DatasetGenerator):
@@ -608,27 +587,86 @@ class SimpleMultiscaleGenerator(DatasetGenerator):
             self.dataloader_map[scale] = torch.utils.data.DataLoader(dataset_map[scale], **dataloader_kwargs)
 
     def generate_dataset(self):
-        if self.is_distributed:
-            desc_msg = "[Rank {}] Inferencing".format(get_local_rank())
-        else:
-            desc_msg = "Inferencing"
+        # Scale별로 한번에 Generate한 다음 합친다.
+        # 큰 스케일부터 생성한다 (Late OOM 문제 발생 가능할 수 있으므로)
+        # NMS에 넣기 전에 먼저 Scale별로 Infer와 Slicing부터 수행한다
+        all_detections_scales = { scale: {} for scale in self.scales }
+        bboxes_scales = { scale: {} for scale in self.scales }
+        scores_scales = { scale: {} for scale in self.scales }
+        image_names = set()
 
-        all_result_bboxes = []
-        all_result_cls = []
-        all_result_scores = []
-        all_result_image_names = []
-        iterators = { scale: iter(self.dataloader_map[scale]) for scale in self.scales }
-        for total_batch_idx in tqdm(range(len(self.dataloader_map[next(iter(self.scales))])), desc=desc_msg):
-            result_bboxes, result_cls, result_scores, result_image_names = self.infer_batch(iterators)
-            all_result_bboxes.extend(result_bboxes)
-            all_result_cls.extend(result_cls)
-            all_result_scores.extend(result_scores)
-            all_result_image_names.extend(result_image_names)
-            
+        for scale in reversed(sorted(self.scales)):
+            if self.is_distributed:
+                desc_msg = "[Rank {}] Inferencing scale {}".format(get_local_rank(), scale)
+            else:
+                desc_msg = "Inferencing scale {}".format(scale)
+
+            prefetcher = ValDataPrefetcher(self.dataloader_map[scale])
+            pbar = tqdm(range(len(self.dataloader_map[scale])), desc=desc_msg)
+            while True:
+                img, target, img_info, img_id = prefetcher.next()
+                if type(img) == type(None):
+                    break  # End of prefetcher
+
+                if self.half_precision:
+                    img = img.to(torch.float16)
+
+                # Infer current scale
+                with torch.no_grad():
+                    batched_outputs = self.model(img)
+                    all_detections, bboxes, scores = postprocess_before_nms(
+                        batched_outputs, scale, img_info,
+                        self.exp.num_classes, self.exp.test_conf, class_agnostic=True
+                    )
+                    del batched_outputs
+
+                # Convert format (np.str_ -> str)
+                img_id = [str(item) for item in img_id]
+
+                # Batched image ids
+                for batch_idx, image_id in enumerate(img_id):
+                    if len(bboxes[batch_idx]) != 0:
+                        all_detections_scales[scale][image_id] = all_detections[batch_idx]
+                        bboxes_scales[scale][image_id] = bboxes[batch_idx]
+                        scores_scales[scale][image_id] = scores[batch_idx]
+
+                # img_id는 배치 단위임
+                image_names.update(img_id)
+                pbar.update()
+
+        # NMS를 수행한다
+        # for scale in reversed(sorted(self.scales)):
+        result_bboxes = []
+        result_cls = []
+        result_scores = []
+        result_image_names = []
+        for image_id in sorted(list(image_names)):
+            all_detections = torch.cat([all_detections_scales[scale][image_id] for scale in self.scales if image_id in all_detections_scales[scale]], dim=0)
+            boxes = torch.cat([bboxes_scales[scale][image_id] for scale in self.scales if image_id in bboxes_scales[scale]], dim=0)
+            scores = torch.cat([scores_scales[scale][image_id] for scale in self.scales if image_id in scores_scales[scale]], dim=0)
+
+            # Class agnostic
+            output = postprocess_after_nms(
+                all_detections, boxes, scores,
+                nms_thre=self.exp.nmsthre, class_agnostic=True
+            )
+
+            if output is None:
+                continue
+
+            bboxes = output[:, 0:4]
+            cls = output[:, 6]
+            scores = output[:, 4] * output[:, 5]
+
+            result_bboxes.append(bboxes.cpu().numpy())
+            result_cls.append(cls.cpu().numpy().astype(int))
+            result_scores.append(scores.cpu().numpy())
+            result_image_names.append(image_id)
+
         # JSON Annotation 저장하기
         images_map = { item['id']: item for item in self.annotations['images'] }
         result_annotations = []
-        for bboxes, cls, scores, image_id in tqdm(zip(all_result_bboxes, all_result_cls, all_result_scores, all_result_image_names), desc="Organizing result bboxes", total=len(result_bboxes)):
+        for bboxes, cls, scores, image_id in tqdm(zip(result_bboxes, result_cls, result_scores, result_image_names), desc="Organizing result bboxes", total=len(result_bboxes)):
             for bbox, cls, score in zip(bboxes, cls, scores):
                 bbox = [int(i) for i in bbox]  # np.int64 items does present
                 bbox = [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]]  # xyminmax2xywh
@@ -645,56 +683,10 @@ class SimpleMultiscaleGenerator(DatasetGenerator):
                 })
 
         return {
-            "images": [ images_map[image_id] for image_id in all_result_image_names ],
+            "images": [ images_map[image_id] for image_id in result_image_names ],
             "type": "instances",
             "annotations": result_annotations,
             "categories": self.annotations["categories"]
         }
-
-    def infer_batch(self, iterators):
-        # Per-scale inference
-        result_bboxes = []
-        result_cls = []
-        result_scores = []
-        result_image_names = []
-        
-        multiscale_batched_outputs = []
-        for scale_idx, scale in enumerate(self.scales):
-            try:
-                img, target, img_info, img_id = next(iterators[scale])
-            except StopIteration:
-                print("StopIteartion occured")
-                continue
-
-            if self.device == 'gpu':
-                img = img.cuda()
-            if self.half_precision:
-                img = img.half()
-
-            # Infer current scale
-            with torch.no_grad():
-                batched_outputs = self.model(img)
-                multiscale_batched_outputs.append(batched_outputs)
-
-        multiscale_batched_outputs = multiscale_postprocess(
-            multiscale_batched_outputs, self.scales, img_info, self.exp.num_classes, self.exp.test_conf,
-            self.exp.nmsthre, class_agnostic=True
-        )
-        
-        for batch_idx, output in enumerate(multiscale_batched_outputs):
-            if output is None:
-                continue
-
-            # bboxes rescale 부분은 multiscale_postprocess로 이동
-            bboxes = output[:, 0:4]
-            cls = output[:, 6]
-            scores = output[:, 4] * output[:, 5]
-
-            result_bboxes.append(bboxes.cpu().numpy())
-            result_cls.append(cls.cpu().numpy().astype(int))
-            result_scores.append(scores.cpu().numpy())
-            result_image_names.append(img_id[batch_idx])  # Using last scale img_id
-        
-        return result_bboxes, result_cls, result_scores, result_image_names
 
 

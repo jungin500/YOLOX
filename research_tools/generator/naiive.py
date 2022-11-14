@@ -7,7 +7,7 @@ from yolox.utils import postprocess
 from yolox.utils.dist import get_local_rank, get_world_size, wait_for_the_master
 
 from .dataset_generator import DatasetGenerator
-from .util import collate_fn, classid2cocoid
+from .util import collate_fn, classid2cocoid, ValDataPrefetcher
 
 
 class NaiiveGenerator(DatasetGenerator):
@@ -59,12 +59,16 @@ class NaiiveGenerator(DatasetGenerator):
             desc_msg = "[Rank {}] Inferencing".format(get_local_rank())
         else:
             desc_msg = "Inferencing"
-            
-        for total_batch_idx, (img, target, img_info, img_id) in tqdm(enumerate(self.dataloader), desc=desc_msg, total=len(self.dataloader)):
-            if self.device == 'gpu':
-                img = img.cuda()
+        
+        prefetcher = ValDataPrefetcher(self.dataloader)
+        pbar = tqdm(range(len(self.dataloader)), desc=desc_msg)
+        while True:
+            img, target, img_info, img_id = prefetcher.next()
+            if type(img) == type(None):
+                break  # End of prefetcher
+
             if self.half_precision:
-                img = img.half()
+                img = img.to(torch.float16)
 
             # Infer current scale
             with torch.no_grad():
@@ -90,6 +94,8 @@ class NaiiveGenerator(DatasetGenerator):
                 result_cls.append(cls.cpu().numpy().astype(int))
                 result_scores.append(scores.cpu().numpy())
                 result_image_names.append(img_id[batch_idx])
+            
+            pbar.update()
     
         # JSON Annotation 저장하기
         images_map = { item['id']: item for item in self.annotations['images'] }

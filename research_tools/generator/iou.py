@@ -7,7 +7,7 @@ from yolox.utils import postprocess
 from yolox.utils.dist import get_local_rank, get_world_size, wait_for_the_master
 
 from .dataset_generator import DatasetGenerator
-from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np
+from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np, ValDataPrefetcher
 
 
 def find_iou_matching_np(bbox: np.ndarray, o_bboxes: np.ndarray, iou_thresh: float):
@@ -98,11 +98,15 @@ class IOUGenerator(DatasetGenerator):
         else:
             desc_msg = "Inferencing"
 
-        for total_batch_idx, (img, target, img_info, img_id) in tqdm(enumerate(self.dataloader), desc=desc_msg, total=len(self.dataloader)):
-            if self.device == 'gpu':
-                img = img.cuda()
+        prefetcher = ValDataPrefetcher(self.dataloader)
+        pbar = tqdm(range(len(self.dataloader)), desc=desc_msg)
+        while True:
+            img, target, img_info, img_id = prefetcher.next()
+            if type(img) == type(None):
+                break  # End of prefetcher
+
             if self.half_precision:
-                img = img.half()
+                img = img.to(torch.float16)
 
             # Infer current scale
             with torch.no_grad():
@@ -137,6 +141,8 @@ class IOUGenerator(DatasetGenerator):
                 )
 
                 results.append([current_img_id, matched_objects])
+
+            pbar.update()
     
         # JSON Annotation 저장하기
         images_map = { item['id']: item for item in self.annotations['images'] }
@@ -166,7 +172,12 @@ class IOUGenerator(DatasetGenerator):
         }
 
     def iou_match(self, image_name, bboxes, cls, scores):
-        o_items = self.annotation_map[image_name]
+        if image_name not in self.annotation_map:
+            # 어노테이션 없는 빈 이미지 (Background)
+            o_items = []
+        else:
+            o_items = self.annotation_map[image_name]
+
 
         o_cls = np.array(list(map(lambda item : cocoid2classid(item['category_id']), o_items))).astype(int)
         o_bboxes = np.array(list(map(lambda item : item['bbox'], o_items)))
