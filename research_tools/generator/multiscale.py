@@ -219,7 +219,7 @@ class MultiscaleGenerator(DatasetGenerator):
             if np.all(bboxes == None):
                 continue
             
-            scoremap = np.where(scores > self.conf_thresh)
+            scoremap = np.where(np.array(scores) > self.conf_thresh)
             bboxes = bboxes[scoremap]
             cls = cls[scoremap]
             scores = scores[scoremap]
