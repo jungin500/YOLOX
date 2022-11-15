@@ -158,15 +158,14 @@ class MultiscaleGenerator(DatasetGenerator):
             clses_allscale = { scale: clses_scales[scale][image_id] for scale in self.scales if image_id in clses_scales[scale] }
             scores_allscale = { scale: scores_scales[scale][image_id] for scale in self.scales if image_id in scores_scales[scale] }
 
-            for batch_idx in range(len(boxes_allscale)):
-                matched_objects, gt_nonmatched_objects, infer_nonmatched_objects = self.multiscale_match(
-                    bboxes_scales = boxes_allscale,
-                    cls_scales = clses_allscale,
-                    scores_scales = scores_allscale,
-                    image_name = image_id,
-                )
+            matched_objects, gt_nonmatched_objects, infer_nonmatched_objects = self.multiscale_match(
+                bboxes_scales = boxes_allscale,
+                cls_scales = clses_allscale,
+                scores_scales = scores_allscale,
+                image_name = image_id,
+            )
 
-                results.append([image_id, matched_objects])
+            results.append([image_id, matched_objects])
 
         # JSON Annotation 저장하기
         images_map = { item['id']: item for item in self.annotations['images'] }

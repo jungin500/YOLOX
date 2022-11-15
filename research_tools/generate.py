@@ -315,6 +315,8 @@ def main(exp, args, num_gpu):
             # Save result with single file
             with open(args.output_path, 'w') as f:
                 json.dump(coco_result, f)
+            logger.info("File saved to {}".format(args.output_path))
+            logger.info("Done generating annotations, exiting ...")
         else:
             # Save each rank into separate file
             with open(args.output_path + '.r{}.tmp'.format(rank), 'w') as f:
@@ -349,12 +351,11 @@ def main(exp, args, num_gpu):
                 for another_rank_id in range(get_local_size()):
                     os.unlink(args.output_path + '.r{}.tmp'.format(another_rank_id))
             
+                logger.info("File saved to {}".format(args.output_path))
+                logger.info("Done generating annotations, exiting ...")
+
             # Synchronize until master worker works hard ;)    
             dist.barrier()
-
-        logger.info("File saved to {}".format(args.output_path))
-        
-    logger.info("Done generating annotations, exiting ...")
 
 
 if __name__ == "__main__":
