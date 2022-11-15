@@ -472,6 +472,7 @@ def postprocess_before_nms(prediction, scale, img_info, num_classes, conf_thre=0
 
         # If none are remaining => process next image
         if not image_pred.size(0):
+            all_detections.append([])
             bboxes.append([])
             scores.append([])
             if not class_agnostic: idxs.append([])
@@ -484,6 +485,7 @@ def postprocess_before_nms(prediction, scale, img_info, num_classes, conf_thre=0
         detections = torch.cat((image_pred[:, :5], class_conf, class_pred.float()), 1)
         detections = detections[conf_mask]
         if not detections.size(0):
+            all_detections.append([])
             bboxes.append([])
             scores.append([])
             if not class_agnostic: idxs.append([])
@@ -640,9 +642,16 @@ class SimpleMultiscaleGenerator(DatasetGenerator):
         result_scores = []
         result_image_names = []
         for image_id in sorted(list(image_names)):
-            all_detections = torch.cat([all_detections_scales[scale][image_id] for scale in self.scales if image_id in all_detections_scales[scale]], dim=0)
-            boxes = torch.cat([bboxes_scales[scale][image_id] for scale in self.scales if image_id in bboxes_scales[scale]], dim=0)
-            scores = torch.cat([scores_scales[scale][image_id] for scale in self.scales if image_id in scores_scales[scale]], dim=0)
+            all_detections = [all_detections_scales[scale][image_id] for scale in self.scales if image_id in all_detections_scales[scale]]
+            if len(all_detections) == 0:
+                continue
+            all_detections = torch.cat(all_detections, dim=0)
+
+            boxes = [bboxes_scales[scale][image_id] for scale in self.scales if image_id in bboxes_scales[scale]]
+            boxes = torch.cat(boxes, dim=0)
+
+            scores = [scores_scales[scale][image_id] for scale in self.scales if image_id in scores_scales[scale]]
+            scores = torch.cat(scores, dim=0)
 
             # Class agnostic
             output = postprocess_after_nms(
