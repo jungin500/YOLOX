@@ -78,7 +78,8 @@ def main(args):
 
     cache_filename = 'imagelist.{}.cache'.format(hashlib.sha256(image_root.encode('utf-8')).hexdigest()[:8])
     if not os.path.exists(cache_filename):
-        logger.info("Traversing filesystem for full image list ...")
+        logger.warning("Image list cache file of path \"{}\" does not exist.".format(image_root))
+        logger.warning("Traversing filesystem for full image list ...")
         image_list = glob.glob(os.path.join(image_root, '*.jpg'))
         logger.info("Filtering out _D.jpg files ...")
         image_list = list(sorted(filter(lambda filename: not filename.lower().endswith('_d.jpg'), image_list)))
