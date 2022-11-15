@@ -115,6 +115,15 @@ def main(args):
             logger.info("Shuffling items ...")
             random.shuffle(image_list)
 
+    # 정상적인 image_list를 골랐는지 확인 (trainval, test 헷갈림)
+    fs_image_id_set = set([Path(image_path).stem for image_path in image_list])
+    json_image_id_set = set([item['id'] for item in annotation['images']])
+    if len(fs_image_id_set - json_image_id_set) == len(fs_image_id_set):
+        # 겹치는 구간이 없음
+        logger.error("Filesystem has {} image set and JSON annotation has {} image set!".format(len(fs_image_id_set), len(json_image_id_set)))
+        logger.error("No occurance detected, maybe wrong dataset?")
+        sys.exit(1)
+
     logger.info("Mapping annotation ...")
     # Slowest implementation
     # bbox_map = { image['id']: list(filter(lambda item: item['image_id'] == image['id'], annotation['annotations'])) for image in tqdm(annotation['images'], "Creating image idmap for faster demo ...") }
