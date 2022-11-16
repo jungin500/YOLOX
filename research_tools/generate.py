@@ -381,6 +381,7 @@ def generate(exp, model, args, is_distributed, rank, world_size, oneshot_image_i
         # Rank 0: coco_result, anoher ranks: None
         coco_result = reduce_coco_result(
             rank = rank,
+            output_path = args.output_path,
             world_size = world_size,
             coco_result = coco_result,
             to_rank = reduce_master_rank
@@ -519,9 +520,9 @@ def save_result(output_path, coco_result):
     logger.info("File saved to {}".format(output_path))
 
 
-def reduce_coco_result(rank, world_size, coco_result, to_rank=0):
+def reduce_coco_result(rank, world_size, output_path, coco_result, to_rank=0):
     # Save each rank into separate file
-    with open(args.output_path + '.r{}.tmp'.format(rank), 'w') as f:
+    with open(output_path + '.r{}.tmp'.format(rank), 'w') as f:
         json.dump(coco_result, f)
 
     # Merge all rank's result into single json file
@@ -531,16 +532,16 @@ def reduce_coco_result(rank, world_size, coco_result, to_rank=0):
         # Do tasks on master rank
         all_annotations = []
         for another_rank_id in range(world_size):
-            with open(args.output_path + '.r{}.tmp'.format(another_rank_id)) as f:
+            with open(output_path + '.r{}.tmp'.format(another_rank_id)) as f:
                 all_annotations.append(json.load(f))
             
         for another_rank_id in range(world_size):
-            os.unlink(args.output_path + '.r{}.tmp'.format(another_rank_id))
+            os.unlink(output_path + '.r{}.tmp'.format(another_rank_id))
         
         # Sanity check
         assert len(all_annotations) > 0, "Empty annotation?"
         for idx, annotation in enumerate(all_annotations):
-            json_filename = args.output_path + '.r{}.tmp'.format(idx)
+            json_filename = output_path + '.r{}.tmp'.format(idx)
             assert len(annotation["images"]) > 0, "Empty images in file {}".format(json_filename)
             assert len(annotation["annotations"]) > 0, "Empty annotations in file {}".format(json_filename)
         assert len(set([json.dumps(annotation["categories"]) for annotation in all_annotations])) == 1, \
