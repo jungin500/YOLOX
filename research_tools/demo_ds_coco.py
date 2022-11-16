@@ -32,7 +32,9 @@ def make_parser():
         help="Small visualization window (640x360)"
     )
     parser.add_argument("--seed", default=None, type=int, help="Shuffle seed for displaying same image")
-    parser.add_argument("--save-recent", default=None, type=int, help="Save recent N items into output/ folder, named <annotation_filename>_XXXXX.jpg")
+    parser.add_argument("--save", default=False, action='store_true', help="Save result image")
+    parser.add_argument("--save-path", default="./", help="Save path")
+    parser.add_argument("--image-title", default=None, help="Image title")
     parser.add_argument("--image-root", default="parent", type=str, help="Image root folder of COCO annotation (default: ../val2017 of coco_annotation file)")
     parser.add_argument(
         "coco_annotation",
@@ -62,9 +64,10 @@ def main(args):
     else:
         image_root = args.image_root
 
-    if args.save_recent is None:
-        vis_window_title = 'Dataset visualization'
-        cv2.namedWindow(vis_window_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+    if args.save:
+        assert os.path.exists(args.save_path), "Save path {} not found!".format(args.save_path)
+    vis_window_title = 'Dataset visualization'
+    cv2.namedWindow(vis_window_title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
     
     logger.info("Loading annotation ...")
     with open(args.coco_annotation, 'r') as f:
@@ -152,9 +155,24 @@ def main(args):
         image_id = Path(image_path).stem
         image = cv2.imread(image_path)
         
-        # Display image name
-        cv2.rectangle(image, (0, 0), (480, 65), (0, 0, 0), -1)
-        cv2.putText(image, image_id, (18, 51), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 2)
+        # Box Padding
+        px, py = 10, 20
+        if args.image_title:
+            # Display title
+            (txt_width, txt_middle_pos), _ = cv2.getTextSize(args.image_title, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            cv2.rectangle(image, (0, 0), (txt_width + px * 2, txt_middle_pos + py * 2), (0, 0, 0), -1)
+            cv2.putText(image, args.image_title, (px, py + txt_middle_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            
+            # Display image name
+            prev_height = txt_middle_pos + py * 2
+            (txt_width, txt_middle_pos), _ = cv2.getTextSize(image_id, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            cv2.rectangle(image, (0, prev_height), (txt_width + px * 2, prev_height + txt_middle_pos + py * 2), (0, 0, 0), -1)
+            cv2.putText(image, image_id, (px, prev_height + py + txt_middle_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        else:
+            # Display image name
+            (txt_width, txt_middle_pos), _ = cv2.getTextSize(image_id, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 2)
+            cv2.rectangle(image, (0, 0), (txt_width + px * 2, txt_middle_pos + py * 2), (0, 0, 0), -1)
+            cv2.putText(image, image_id, (px, py + txt_middle_pos), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 2)
 
         # Extra information string
         extras = ''
@@ -204,7 +222,10 @@ def main(args):
                 )
         else:
             extras = '(No annotation)'
-        if args.save_recent is None:
+            
+        if args.save:
+            cv2.imwrite(os.path.join(args.save_path, image_id + ".jpg"), image)
+        else:
             if args.small:
                 # Ratio-perserve resizing
                 r_image = image.shape[0] / image.shape[1]  # H / W
@@ -218,14 +239,6 @@ def main(args):
             key = cv2.waitKey(0)
             if key == 113:
                 logger.info("Stopping viewer")
-                break
-        else:
-            if not os.path.exists("outputs"):
-                os.makedirs("outputs", exist_ok=True)
-            cv2.imwrite(os.path.join("outputs", image_id + ".jpg"), image)
-
-            items_to_save = args.save_recent
-            if items_to_save <= display_idx:
                 break
             
         display_idx += 1

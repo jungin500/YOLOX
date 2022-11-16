@@ -164,7 +164,7 @@ def main(exp, args, num_gpu):
     rank = get_local_rank()
     world_size = get_local_size()
 
-    if args.eval or args.conf_eval:
+    if args.eval or args.conf_eval or args.image_ids:
         file_name = os.path.join(exp.output_dir, exp.exp_name)
         fig_savedir = os.path.join(file_name, datetime.datetime.now().strftime('%y%m%d_%H%M%S'))
 
@@ -256,13 +256,23 @@ def main(exp, args, num_gpu):
             return  # exit application (wait for master rank to exit)
 
         if args.image_ids:
-            # 화면에 표출
+            # 화면에 표출 및 저장
             visualize(
                 exp = exp,
                 args = args,
                 coco_result = coco_result,
-                oneshot_image_ids = oneshot_image_ids
+                oneshot_image_ids = oneshot_image_ids,
+                save_dir = fig_savedir,
+                image_title = "{}, conf={} nms={} g_conf={} g_iou={} rm_thresh={}".format(
+                    args.strategy,
+                    args.conf,
+                    args.nms,
+                    args.generator_conf,
+                    args.generator_iou,
+                    args.rematch_thresh
+                )
             )
+            logger.info("Result images are stored into {}".format(fig_savedir))
         else:
             # 결과 저장 (Distributed인 경우 Rank 0만 수행)
             save_result(
@@ -495,11 +505,17 @@ def build_generator(exp, model, args, is_distributed, oneshot_image_ids, scales)
     return generator
 
 
-def visualize(exp, args, coco_result, oneshot_image_ids):
+def visualize(exp, args, coco_result, oneshot_image_ids, save_dir = None, image_title = None):
     # 결과 표출 (임시 JSON 파일 활용)
     fp, fileloc = tempfile.mkstemp(suffix=".json")
     with open(fp, 'w') as f:
         json.dump(coco_result, f)
+    
+    extra_args = []
+    if save_dir is not None:
+        extra_args.extend(['--save', '--save-path', save_dir])
+    if image_title is not None:
+        extra_args.extend(['--image-title', image_title])
     
     # demo_ds_coco 실행
     from demo_ds_coco import make_parser as demo_make_parser
@@ -507,8 +523,9 @@ def visualize(exp, args, coco_result, oneshot_image_ids):
     demo_ds_args = demo_make_parser().parse_args([
         '--seed', str(args.seed),
         '--image-root', os.path.join(exp.data_dir, 'train2017'),
+        *extra_args,
         fileloc,
-        *oneshot_image_ids
+        *oneshot_image_ids,
     ])
     logger.info("Beginning demo display")
     demo_ds_coco(demo_ds_args)
