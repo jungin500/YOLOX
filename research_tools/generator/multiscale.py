@@ -41,7 +41,18 @@ class MultiscaleGenerator(DatasetGenerator):
         self.scales = scales
         self.conf_thresh = conf
         self.iou_thresh = iou_thresh
-        self.rematch_thresh = rematch_thresh
+        
+        # Class-aware Rematch Threshold
+        # 각 클래스별로 GT와 매칭되지 않은 Infer 객체들끼리 다시 한 번 매칭을 수행한다.
+        # 이 때, 매칭되지 않은 Infer 간의 IoU 계산 시 N번 이상 발생한 경우 해당 객체를 Matched로 이동하고
+        # 해당 객체와 함께 IoU Thresh를 넘은 객체들을 Group하여 occurance를 계산한다.
+        # class_aware_rematch_thresh가 이 N을 의미한다.
+        self.class_aware_rematch_thresh = rematch_thresh
+        
+        # Class-unaware Rematch Threshold
+        # Class-aware Rematch 이 후에도 남아있는 Infer 객체들끼리 다시 한 번 매칭을 수행한다.
+        # 이 때, 클래스 
+        self.class_unaware_rematch_thresh = rematch_thresh
 
     def init(self):
         from yolox.data import (
@@ -299,6 +310,11 @@ class MultiscaleGenerator(DatasetGenerator):
                 # 모든 GT 매칭이 끝나고 남은 bbox를 추가한다.
                 for scale in sorted(infer_bboxes_scales.keys()):
                     infer_only_bbox_table.extend(infer_bboxes_scales[scale])
+                    
+            if isinstance(gt_only_bbox_table, list):
+                gt_only_bbox_table = np.array(gt_only_bbox_table)
+            if isinstance(infer_only_bbox_table, list):
+                infer_only_bbox_table = np.array(infer_only_bbox_table)
 
             # Class-inaware per-class rematch infer_only_bbox
             # 이전 매칭 결과중 infer_only_bbox_table에 있는 박스들을 서로 매칭하여
@@ -315,33 +331,42 @@ class MultiscaleGenerator(DatasetGenerator):
 
                 is_srcbbox_removed = False
                 iou_argsort = np.argsort(iou_table)
-                if np.all(iou_table[iou_argsort][::-1][:self.rematch_thresh] >= self.iou_thresh):
+                if np.all(iou_table[iou_argsort][::-1][:self.class_aware_rematch_thresh] >= self.iou_thresh):
                     # Remove all thresh_over_bbox from infer_only_bbox_table
-                    thresh_over_flags = iou_table >= self.iou_thresh
-                    thresh_over_bboxes = [bbox for idx, bbox in enumerate(infer_only_bbox_table) if thresh_over_flags[idx]]  # Reason why inclueded itself 
+                    # iou_table을 미리 sort해 둔 성태로 flag map 생성 (가장 높은 순으로 flag 생성) -> [True, True, False, False, False, ...]
+                    thresh_over_flags = iou_table[iou_argsort[::-1]] >= self.iou_thresh
+                    thresh_over_bboxes = [bbox for idx, bbox in enumerate(infer_only_bbox_table[iou_argsort[::-1]]) if thresh_over_flags[idx]]  # Reason why inclueded itself 
+                    
+                    # tresh_over_bboxes는 이미 가장 IoU가 높은 순으로 정렬되어 있다.
+                    # 추가로 자기 자신도 들어가 있으므로, Group으로 전부 제거된다.
+                    # 제거되는 그룹이 결국 thresh_over_bboxes인 셈이다.
                     for thresh_over_bbox in thresh_over_bboxes:
                         # Find appropriate bbox and remove
                         # It will remove srcbbox as well, so no further removal required
                         for idx, dstbbox in enumerate(infer_only_bbox_table):
                             if np.all(dstbbox == thresh_over_bbox):
                                 infer_only_bbox_table = np.delete(infer_only_bbox_table, idx, axis=0)
-                                break
-                    infer_only_extras.append(srcbbox)
+                                break  # 다음 thresh_over_bbox로 넘어감
+                            
+                    infer_only_extras.append((srcbbox, thresh_over_bboxes))
                     is_srcbbox_removed = True
 
                 if not is_srcbbox_removed:
                     srcbbox_idx += 1
                 # End srcbbox loop
 
+            # class-unaware match가 끝나고 남은 객체들을 match_table_all에 넣기 위한 준비.
             match_table_target = [
                 (np.array(gt_bboxes[gt_idx]).tolist(), len(match_table[gt_idx]))
                 for gt_idx in match_table.keys()
                 if len(match_table[gt_idx]) > 0
             ]
             match_table_target.extend([
-                (np.array(item).tolist(), 1)
-                for item in infer_only_extras
+                (np.array(item).tolist(), len(groups))
+                for item, groups in infer_only_extras
             ])
+            
+            # class-unaware match가 끝나고 남은 객체들을 추가한다.
             if len(match_table_target) > 0:
                 match_table_all[class_id] = match_table_target
             if len(gt_only_bbox_table) > 0:
@@ -349,6 +374,10 @@ class MultiscaleGenerator(DatasetGenerator):
             if len(infer_only_bbox_table) > 0:
                 infer_only_bbox_table_all[class_id] = np.array(infer_only_bbox_table).tolist()
         
+        # Class-aware rematch
+        # 클래스가 다른 매칭 결과들 사이에 같은 위치(=IoU 높음)에 있는 객체를 골라내고,
+        # 클래스 지배적인 객체의 클래스로 그 클래스를 설정한다.
+        #
         # 동일 위치에서 지배적인 클래스를 우선하는 Matching Strategy
         #
         # 전체 bbox를 돌면서 Inner match (match_table->match_table)과
@@ -378,6 +407,8 @@ class MultiscaleGenerator(DatasetGenerator):
             
             # 지배적인 클래스를 찾아서 해당 클래스로 세팅하고,
             # flatten_items로부터 iou_over_items에 해당하는 bbox를 삭제한다.
+            # 
+            # @externaldep matched_item_idx, flatten_matched_items
             def sanitize_bboxes(flatten_matched_items, flatten_items, iou_over_items):
                 # 지배적인 클래스 찾기
                 all_classes = [class_id]
@@ -402,9 +433,9 @@ class MultiscaleGenerator(DatasetGenerator):
                 flatten_matched_items[matched_item_idx] = np.array([*bbox_origin, dorminant_class_id, 1])
                 return flatten_items
                 
-            # Inner Match
+            # Inner Match (Matched->Matched, Dorminant class 설정을 위함)
             for idx, (*bbox_target, class_id, class_occurances) in enumerate(flatten_matched_items):
-                if np.all(bbox_origin == bbox_target):
+                if np.all(bbox_origin == bbox_target):  # 같은 객체는 IoU가 1.0이므로 제외한다.
                     continue
                 iou_table.append((idx, iou_np(np.array(bbox_origin), np.array(bbox_target))))
             
@@ -511,7 +542,7 @@ def postprocess_after_nms(all_detections, bboxes, scores, idxs=None, nms_thre=0.
     if class_agnostic:
         nms_out_index = torchvision.ops.nms(bboxes, scores, nms_thre)
     else:
-        nms_out_index = torchvision.ops.batched_nms(bboxes, scores, idxs)
+        nms_out_index = torchvision.ops.batched_nms(bboxes, scores, idxs, nms_thre)
 
     detections = all_detections[nms_out_index]
 
