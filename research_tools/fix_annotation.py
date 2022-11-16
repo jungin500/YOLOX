@@ -10,19 +10,21 @@ from tqdm.auto import tqdm
 from pathlib import Path
 import shutil
 
-
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('location', help="Folder to find json files")
     args = parser.parse_args()
 
-    json_file_list = glob.glob(os.path.join(args.location, '**', '*.json'), recursive=True)
-    
+    json_file_list = glob.glob(os.path.join(args.location, '**', '*.json'),
+                               recursive=True)
+
     for idx, json_file in enumerate(json_file_list):
-        print("({}/{}) Loading file {} ...".format(idx + 1, len(json_file_list), json_file))
+        print("({}/{}) Loading file {} ...".format(idx + 1,
+                                                   len(json_file_list),
+                                                   json_file))
         with open(json_file) as f:
             body = json.load(f)
-        
+
         # Check if categories has certain fields or not
         if type(body['categories']) == type({}):
             print("Found buggy categories on file {}!".format(json_file))

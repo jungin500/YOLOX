@@ -30,10 +30,11 @@ def collate_fn(args):
 def xywh2xyminmax(bbox):
     return [bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]
 
-    
+
 def cocoid2classid(coco_id: int):
     # COCO에서는 helmet_on(1) ~ belt_off(4)로 구성된다.
     return coco_id - 1
+
 
 def classid2cocoid(class_id: int):
     # class_id는 0부터 시작한다.

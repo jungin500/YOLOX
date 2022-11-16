@@ -68,8 +68,7 @@ def eval_coco(trainval_json, generated_json):
             'bbox': item['bbox'],  # [4, ]
             'score': 1.0,
             'category_id': item['category_id']
-        }
-        for item in bpdy['annotations']
+        } for item in bpdy['annotations']
     ]  # {imageID,x1,y1,w,h,score,class}
 
     # skip noninformative printouts
@@ -88,7 +87,7 @@ def eval_coco(trainval_json, generated_json):
     info = redirect_string.getvalue()
     cat_ids = list(cocoGt.cats.keys())
     cat_names = [cocoGt.cats[catId]['name'] for catId in sorted(cat_ids)]
-    
+
     ap5095, ap50, ap_s, ap_m, ap_l = reverse_parse(info)
 
     AP_table = per_class_AP_table(cocoEval, class_names=cat_names)
@@ -105,7 +104,7 @@ def eval_coco(trainval_json, generated_json):
         cocoEval_50.params.iouThrs = np.array([0.5])  # Only 0.5
         cocoEval_50.evaluate()
         cocoEval_50.accumulate()
-        
+
     AP50_table = per_class_AP_table(cocoEval_50, class_names=cat_names)
     AP50_perclass = per_class_AP(cocoEval, class_names=cat_names)
     info += "per class AP(IoU=0.5):\n" + AP50_table + "\n"
@@ -113,21 +112,16 @@ def eval_coco(trainval_json, generated_json):
     print(info)
     return ap5095, ap50, ap_s, ap_m, ap_l, AP_perclass, AR_perclass, AP50_perclass
 
+
 if __name__ == '__main__':
     if len(sys.argv) == 1:
         # 같은 놈으로 하면 100%가 나와야 한다.
         target_json = '/home/jungin500/workspace/paper/sparse-label-assignment/yolox-datasets/construction-safety/annotations/annotations_test.json'
-        eval_coco(
-            target_json, target_json
-        )
+        eval_coco(target_json, target_json)
     elif len(sys.argv) == 2:
         target_json = sys.argv[1]
-        eval_coco(
-            target_json, target_json
-        )
+        eval_coco(target_json, target_json)
     elif len(sys.argv) == 3:
-        eval_coco(
-            sys.argv[1], sys.argv[2]
-        )
+        eval_coco(sys.argv[1], sys.argv[2])
     else:
         print("Usage: {} [source_json [target_json]]".format(sys.argv[0]))

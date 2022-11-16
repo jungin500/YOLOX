@@ -1,5 +1,6 @@
 import torch
-import time
+from typing import Tuple
+import numpy as np
 
 
 class ValDataPrefetcher:
@@ -13,7 +14,8 @@ class ValDataPrefetcher:
 
     def preload(self):
         try:
-            self.next_img, self.next_target, self.next_img_info, self.next_img_id = next(self.loader)
+            self.next_img, self.next_target, self.next_img_info, self.next_img_id = next(
+                self.loader)
         except StopIteration:
             self.next_img = None
             self.next_target = None
@@ -25,7 +27,7 @@ class ValDataPrefetcher:
             self.input_cuda()
             self.next_target = self.next_target.cuda(non_blocking=True)
 
-    def next(self):
+    def next(self) -> Tuple[torch.Tensor, torch.Tensor, np.ndarray, np.ndarray]:
         torch.cuda.current_stream().wait_stream(self.stream)
         img = self.next_img
         target = self.next_target

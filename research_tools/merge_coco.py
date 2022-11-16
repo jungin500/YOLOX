@@ -19,21 +19,21 @@ import json
 
 from util.merge_coco import merge_coco
 
+
 def make_parser():
     parser = argparse.ArgumentParser("COCO Multiple annotation merger")
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         dest="output",
         type=str,
         required=True,
         help="Output annotation filename",
     )
-    parser.add_argument(
-        "multiple_annotations",
-        help="COCO annotation items",
-        default=None,
-        nargs=argparse.REMAINDER
-    )
+    parser.add_argument("multiple_annotations",
+                        help="COCO annotation items",
+                        default=None,
+                        nargs=argparse.REMAINDER)
     return parser
 
 
@@ -50,13 +50,15 @@ def main(args):
         with open(filename, 'r') as f:
             annotation = json.load(f)
         all_annotations.append(annotation)
-        
+
     # Sanity check
     assert len(all_annotations) > 0, "Empty annotation?"
     for idx, annotation in enumerate(all_annotations):
         json_filename = args.multiple_annotations[idx]
-        assert len(annotation["images"]) > 0, "Empty images in file {}".format(json_filename)
-        assert len(annotation["annotations"]) > 0, "Empty annotations in file {}".format(json_filename)
+        assert len(annotation["images"]) > 0, "Empty images in file {}".format(
+            json_filename)
+        assert len(annotation["annotations"]
+                   ) > 0, "Empty annotations in file {}".format(json_filename)
     assert len(set([json.dumps(annotation["categories"]) for annotation in all_annotations])) == 1, \
         "Different categories between annotations!"
 
@@ -68,6 +70,7 @@ def main(args):
     with open(args.output, 'w') as f:
         json.dump(result_annotation, f)
     logger.info("Done")
+
 
 if __name__ == "__main__":
     args = make_parser().parse_args()

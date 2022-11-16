@@ -26,6 +26,7 @@ def iou(bbox1, bbox2):
 
     return iou
 
+
 def iou_np(bbox1: np.ndarray, bbox2: np.ndarray) -> float:
     w, h = bbox1[2:] - bbox1[:2]
     bbox1_vol = w * h
@@ -43,6 +44,7 @@ def iou_np(bbox1: np.ndarray, bbox2: np.ndarray) -> float:
     union_vol = bbox1_vol + bbox2_vol - inter_vol
     return inter_vol / union_vol
 
+
 def iou_torch(bbox1: torch.Tensor, bbox2: torch.Tensor):
     w, h = bbox1[2:] - bbox1[:2]
     bbox1_vol = w * h
@@ -50,15 +52,12 @@ def iou_torch(bbox1: torch.Tensor, bbox2: torch.Tensor):
     bbox2_vol = w * h
 
     b_all = torch.vstack([bbox1, bbox2])
-    inter_xymin = torch.max(b_all[:, :2], axis=0)[0]  # returns values, indices
-    inter_xymax = torch.min(b_all[:, 2:], axis=0)[0]  # returns values, indices
+    inter_xymin = torch.max(b_all[:, :2], dim=0)[0]  # returns values, indices
+    inter_xymax = torch.min(b_all[:, 2:], dim=0)[0]  # returns values, indices
 
     w, h = inter_xymax - inter_xymin
     inter_vol = w * h
     union_vol = bbox1_vol + bbox2_vol - inter_vol
 
-    return torch.where(
-        torch.any(inter_xymax < inter_xymin),
-        0.,
-        inter_vol / union_vol
-    )
+    return torch.where(torch.any(inter_xymax < inter_xymin), 0.,
+                       inter_vol / union_vol)
