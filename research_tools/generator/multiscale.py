@@ -270,14 +270,15 @@ class MultiscaleGenerator(DatasetGenerator):
         gt_only_bbox_table_all = {}
         infer_only_bbox_table_all = {}
 
-        for class_id in sorted(
-                np.unique(
-                    np.concatenate([
-                        *[
-                            cls_scales[scale] for scale in self.scales
-                            if np.all(cls_scales[scale] != None)
-                        ], o_cls
-                    ]).astype(int))):
+        unique_class_ids = sorted(
+            np.unique(
+                np.concatenate([
+                    *[
+                        cls_scales[scale] for scale in self.scales
+                        if np.all(cls_scales[scale] != None)
+                    ], o_cls
+                ]).astype(int)))
+        for class_id in unique_class_ids:
             infer_only_extras = []  # To be used after picking infer_nonmatched
 
             if class_id not in infer_objects:
@@ -450,21 +451,21 @@ class MultiscaleGenerator(DatasetGenerator):
 
         matched_item_idx = 0
         while matched_item_idx < len(flatten_matched_items):
-            *bbox_origin, class_id, class_occurances = flatten_matched_items[
+            *bbox_origin, matched_class_id, matched_class_occurances = flatten_matched_items[
                 matched_item_idx]
 
             iou_table = []  # Inner Match
             gt_iou_table = []  # Outer Match (GT->Matched)
             infer_iou_table = []  # Outer Match (Infer->Matched)
 
-            # 지배적인 클래스를 찾아서 해당 클래스로 세팅하고,
+            # 지배적인 클래스를 찾아서 flatten_matched_items에 해당 클래스로 세팅하고,
             # flatten_items로부터 iou_over_items에 해당하는 bbox를 삭제한다.
             #
-            # @externaldep matched_item_idx, flatten_matched_items
+            # @externaldep matched_item_idx
             def sanitize_bboxes(flatten_matched_items, flatten_items,
                                 iou_over_items):
                 # 지배적인 클래스 찾기
-                all_classes = [class_id]
+                all_classes = [matched_class_id for _ in range(int(matched_class_occurances))]  # 이미 있는 Matched의 occurances만큼 넣어준다.
                 for *_, target_class_id, target_class_occurances in iou_over_items:
                     for _ in range(int(target_class_occurances)):
                         all_classes.append(target_class_id)
@@ -485,8 +486,10 @@ class MultiscaleGenerator(DatasetGenerator):
                     flatten_items = np.delete(flatten_items, idx, axis=0)
 
                 # 현재 박스의 클래스를 지배적인 클래스로 변경하기
+                # IoU가 같으니 다른 class였어도 같은 bbox에 대한 detection이라고 본다.
+                # 그렇기 때문에 all_class의 크기만큼을 occurance count로 전달한다.
                 flatten_matched_items[matched_item_idx] = np.array(
-                    [*bbox_origin, dorminant_class_id, 1])
+                    [*bbox_origin, dorminant_class_id, len(all_classes)])
                 return flatten_items
 
             # Inner Match (Matched->Matched, Dorminant class 설정을 위함)
