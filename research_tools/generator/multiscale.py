@@ -567,7 +567,7 @@ class MultiscaleGenerator(DatasetGenerator):
                         all_classes.append(target_class_id)
                 all_classes = np.array(all_classes)
                 unique_class_ids, unique_class_counts = np.unique(all_classes, return_counts=True)
-                dorminant_class_id = unique_class_ids[np.argmax(unique_class_counts)]
+                dominant_class_id = unique_class_ids[np.argmax(unique_class_counts)]
 
                 # 겹치는 박스 모두 지우기
                 for item in iou_over_items:
@@ -582,10 +582,10 @@ class MultiscaleGenerator(DatasetGenerator):
                 # 현재 박스의 클래스를 지배적인 클래스로 변경하기
                 # IoU가 같으니 다른 class였어도 같은 bbox에 대한 detection이라고 본다.
                 # 그렇기 때문에 all_class의 크기만큼을 occurance count로 전달한다.
-                flatten_matched_items[matched_item_idx] = np.array([*bbox_origin, dorminant_class_id, len(all_classes)])
+                flatten_matched_items[matched_item_idx] = np.array([*bbox_origin, dominant_class_id, len(all_classes)])
                 return flatten_items
 
-            # Inner Match (Matched->Matched, Dorminant class 설정을 위함)
+            # Inner Match (Matched->Matched, dominant class 설정을 위함)
             for idx, (*bbox_target, class_id, class_occurances) in enumerate(flatten_matched_items):
                 if np.all(bbox_origin == bbox_target):  # 같은 객체는 IoU가 1.0이므로 제외한다.
                     continue
