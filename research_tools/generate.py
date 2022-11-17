@@ -162,6 +162,13 @@ def make_parser():
         help="Evaluate by conf search space",
     )
     parser.add_argument(
+        "--disalbe-mask-reinfer",
+        dest="disable_masked_reinfer",
+        default=False,
+        action="store_true",
+        help="Disable Masked Reinference (for paper metrics)",
+    )
+    parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
         default=None,
@@ -573,6 +580,7 @@ def build_generator(exp, model, args, is_distributed, oneshot_image_ids,
                                         is_distributed=is_distributed,
                                         batch_size=args.batch_size,
                                         half_precision=args.fp16,
+                                        masked_reinfer=not args.disable_masked_reinfer,
                                         oneshot_image_ids=oneshot_image_ids)
 
     elif args.strategy == 'scales-simple':

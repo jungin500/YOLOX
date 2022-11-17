@@ -30,6 +30,7 @@ class MultiscaleGenerator(DatasetGenerator):
         is_distributed,
         batch_size,
         half_precision,
+        masked_reinfer=True,
         oneshot_image_ids=None,
     ):
         super().__init__(
@@ -57,7 +58,7 @@ class MultiscaleGenerator(DatasetGenerator):
         self.class_unaware_rematch_thresh = rematch_thresh
 
         # 결과 bbox mask를 적용해 다시 infer한 결과도 포함
-        self.masked_reinfer = True
+        self.masked_reinfer = masked_reinfer
         self.mask_iou_thersh = 0.8
 
     def init(self):
