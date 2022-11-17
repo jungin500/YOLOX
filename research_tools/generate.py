@@ -285,12 +285,12 @@ def main(exp, args, num_gpu):
                 all_AP50_perclass.append(AP50_perclass)
 
     if args.conf_eval or args.eval:
-        plot_result(fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
+        plot_result(exp, fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
                     all_AR_perclass, all_AP50_perclass)
     logger.info("Done generating annotations, exiting ...")
 
 
-def plot_result(fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
+def plot_result(exp, fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
                 all_AR_perclass, all_AP50_perclass):
     # 2nd Index 접근을 위한 변환
     all_ap5095 = np.array(all_ap5095)
