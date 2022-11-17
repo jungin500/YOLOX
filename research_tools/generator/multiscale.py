@@ -266,6 +266,10 @@ class MultiscaleGenerator(DatasetGenerator):
                 for scale in self.scales if image_id in scores_scales[scale]
             }
 
+            masked_boxes_allscale = None
+            masked_clses_allscale = None
+            masked_scores_allscale = None
+
             if self.masked_reinfer:
                 masked_boxes_allscale = {
                     scale: masked_boxes_scales[scale][image_id]

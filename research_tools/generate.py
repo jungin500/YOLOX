@@ -125,7 +125,7 @@ def make_parser():
         help="Evaluate by conf search space",
     )
     parser.add_argument(
-        "--disalbe-mask-reinfer",
+        "--disable-mask-reinfer",
         dest="disable_masked_reinfer",
         default=False,
         action="store_true",
