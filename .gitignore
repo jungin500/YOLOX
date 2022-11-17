@@ -227,3 +227,6 @@ wandb/
 # ignore k8s yamls
 research/**/
 research_legacy/
+
+# ignore cache files
+imagelist.*.cache
