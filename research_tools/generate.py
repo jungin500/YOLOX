@@ -234,6 +234,9 @@ def main(exp, args, num_gpu):
     for conf_thresh_idx, conf_thresh in enumerate(conf_thresh_space):
         logger.info("Running confidence threshold {} ({}/{})".format(conf_thresh, conf_thresh_idx + 1,
                                                                      len(conf_thresh_space)))
+        # Wait for previous master node to finish evaluation
+        dist.barrier()
+
         # Target test confidence
         exp.test_conf = conf_thresh
         args.conf = conf_thresh
@@ -250,7 +253,7 @@ def main(exp, args, num_gpu):
                                reduce_master_rank=reduce_master_rank)
 
         if rank != reduce_master_rank:
-            return  # exit application (wait for master rank to exit)
+            continue  # Continue next conf thresh
 
         if args.image_ids:
             # 화면에 표출 및 저장
