@@ -12,8 +12,7 @@ from .dataset_generator import DatasetGenerator
 from .util import collate_fn, xywh2xyminmax, classid2cocoid, cocoid2classid, iou_np, ValDataPrefetcher
 
 
-def find_iou_matching_np(bbox: np.ndarray, o_bboxes: np.ndarray,
-                         iou_thresh: float):
+def find_iou_matching_np(bbox: np.ndarray, o_bboxes: np.ndarray, iou_thresh: float):
     iou_table = []
     for o_bbox in o_bboxes:
         iou_table.append(iou_np(bbox, o_bbox))
@@ -71,12 +70,11 @@ class IOUGenerator(DatasetGenerator):
 
         if self.is_distributed:
             self.batch_size = self.batch_size // dist.get_world_size()
-            sampler = torch.utils.data.distributed.DistributedSampler(
-                dataset,
-                rank=get_local_rank(),
-                num_replicas=get_world_size(),
-                shuffle=False,
-                drop_last=False)
+            sampler = torch.utils.data.distributed.DistributedSampler(dataset,
+                                                                      rank=get_local_rank(),
+                                                                      num_replicas=get_world_size(),
+                                                                      shuffle=False,
+                                                                      drop_last=False)
         else:
             sampler = torch.utils.data.SequentialSampler(dataset)
 
@@ -87,8 +85,7 @@ class IOUGenerator(DatasetGenerator):
             "collate_fn": collate_fn,
         }
         dataloader_kwargs["batch_size"] = self.batch_size
-        self.dataloader = torch.utils.data.DataLoader(dataset,
-                                                      **dataloader_kwargs)
+        self.dataloader = torch.utils.data.DataLoader(dataset, **dataloader_kwargs)
 
     def generate_dataset(self):
         results = []
@@ -136,10 +133,7 @@ class IOUGenerator(DatasetGenerator):
                 current_img_id = img_id[batch_idx]
 
                 matched_objects, gt_nonmatched_objects, infer_nonmatched_objects = self.iou_match(
-                    image_name=current_img_id,
-                    bboxes=bboxes,
-                    cls=cls,
-                    scores=scores)
+                    image_name=current_img_id, bboxes=bboxes, cls=cls, scores=scores)
 
                 results.append([current_img_id, matched_objects])
 
@@ -152,27 +146,17 @@ class IOUGenerator(DatasetGenerator):
             for class_id in bboxes.keys():
                 class_bboxes = bboxes[class_id]
                 for bbox in class_bboxes:
-                    bbox = [int(i)
-                            for i in bbox]  # np.int64 items does present
-                    bbox = [
-                        bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]
-                    ]  # xyminmax2xywh
+                    bbox = [int(i) for i in bbox]  # np.int64 items does present
+                    bbox = [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]]  # xyminmax2xywh
                     result_annotations.append({
-                        'area':
-                        bbox[2] * bbox[3],
-                        'iscrowd':
-                        0,
-                        'bbox':
-                        bbox,
-                        'category_id':
-                        int(classid2cocoid(class_id)),
-                        'ignore':
-                        0,
+                        'area': bbox[2] * bbox[3],
+                        'iscrowd': 0,
+                        'bbox': bbox,
+                        'category_id': int(classid2cocoid(class_id)),
+                        'ignore': 0,
                         'segmentation': [],
-                        'image_id':
-                        image_id,
-                        'id':
-                        len(result_annotations) + 1  # 1부터 시작한다.
+                        'image_id': image_id,
+                        'id': len(result_annotations) + 1  # 1부터 시작한다.
                     })
 
         return {
@@ -189,9 +173,7 @@ class IOUGenerator(DatasetGenerator):
         else:
             o_items = self.annotation_map[image_name]
 
-        o_cls = np.array(
-            list(map(lambda item: cocoid2classid(item['category_id']),
-                     o_items))).astype(int)
+        o_cls = np.array(list(map(lambda item: cocoid2classid(item['category_id']), o_items))).astype(int)
         o_bboxes = np.array(list(map(lambda item: item['bbox'], o_items)))
         o_bboxes = np.array(list(map(xywh2xyminmax, o_bboxes)))
 
@@ -206,13 +188,11 @@ class IOUGenerator(DatasetGenerator):
             infer_nonmatched_objects[target_cls_idxname] = []
 
             idxmap = np.where(cls == target_cls)
-            assert len(bboxes[idxmap]) == len(cls[idxmap]) == len(
-                scores[idxmap])
+            assert len(bboxes[idxmap]) == len(cls[idxmap]) == len(scores[idxmap])
 
             o_bboxes_targetcls = o_bboxes[np.where(o_cls == target_cls)]
 
-            for bbox, single_cls, score in zip(bboxes[idxmap], cls[idxmap],
-                                               scores[idxmap]):
+            for bbox, single_cls, score in zip(bboxes[idxmap], cls[idxmap], scores[idxmap]):
                 if score < self.conf_thresh:
                     # print('Skipping bbox1 {} due to low confidence {}'.format(bbox, score))
                     continue
@@ -223,12 +203,10 @@ class IOUGenerator(DatasetGenerator):
                     infer_nonmatched_objects[target_cls_idxname].append(bbox)
                     continue
 
-                match_result, o_bbox, o_bbox_id, max_iou = find_iou_matching_np(
-                    bbox, o_bboxes_targetcls, self.iou_thresh)
+                match_result, o_bbox, o_bbox_id, max_iou = find_iou_matching_np(bbox, o_bboxes_targetcls,
+                                                                                self.iou_thresh)
                 # Remove that bbox from o_bboxes
-                o_bboxes_targetcls = np.delete(o_bboxes_targetcls,
-                                               o_bbox_id,
-                                               axis=0)
+                o_bboxes_targetcls = np.delete(o_bboxes_targetcls, o_bbox_id, axis=0)
 
                 if match_result:
                     matched_objects[target_cls_idxname].append(bbox)

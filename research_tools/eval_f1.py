@@ -14,8 +14,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from yolox.core import launch
 from yolox.exp import get_exp
-from yolox.utils import (configure_module, configure_nccl, fuse_model,
-                         get_local_rank, get_model_info, setup_logger)
+from yolox.utils import (configure_module, configure_nccl, fuse_model, get_local_rank, get_model_info, setup_logger)
 
 import numpy as np
 from generator.util import iou_np
@@ -28,41 +27,20 @@ import datetime
 def make_parser():
     parser = argparse.ArgumentParser("YOLOX Eval")
     parser.add_argument("-expn", "--experiment-name", type=str, default=None)
-    parser.add_argument("-n",
-                        "--name",
-                        type=str,
-                        default=None,
-                        help="model name")
+    parser.add_argument("-n", "--name", type=str, default=None, help="model name")
 
     # distributed
-    parser.add_argument("--dist-backend",
-                        default="nccl",
-                        type=str,
-                        help="distributed backend")
+    parser.add_argument("--dist-backend", default="nccl", type=str, help="distributed backend")
     parser.add_argument(
         "--dist-url",
         default=None,
         type=str,
         help="url used to set up distributed training",
     )
-    parser.add_argument("-b",
-                        "--batch-size",
-                        type=int,
-                        default=64,
-                        help="batch size")
-    parser.add_argument("-d",
-                        "--devices",
-                        default=None,
-                        type=int,
-                        help="device for training")
-    parser.add_argument("--num_machines",
-                        default=1,
-                        type=int,
-                        help="num of node for training")
-    parser.add_argument("--machine_rank",
-                        default=0,
-                        type=int,
-                        help="node rank for multi-node training")
+    parser.add_argument("-b", "--batch-size", type=int, default=64, help="batch size")
+    parser.add_argument("-d", "--devices", default=None, type=int, help="device for training")
+    parser.add_argument("--num_machines", default=1, type=int, help="num of node for training")
+    parser.add_argument("--machine_rank", default=0, type=int, help="node rank for multi-node training")
     parser.add_argument(
         "-f",
         "--exp_file",
@@ -70,20 +48,10 @@ def make_parser():
         type=str,
         help="please input your experiment description file",
     )
-    parser.add_argument("-c",
-                        "--ckpt",
-                        default=None,
-                        type=str,
-                        help="ckpt for eval")
+    parser.add_argument("-c", "--ckpt", default=None, type=str, help="ckpt for eval")
     parser.add_argument("--conf", default=None, type=float, help="test conf")
-    parser.add_argument("--nms",
-                        default=None,
-                        type=float,
-                        help="test nms threshold")
-    parser.add_argument("--tsize",
-                        default=None,
-                        type=int,
-                        help="test img size")
+    parser.add_argument("--nms", default=None, type=float, help="test nms threshold")
+    parser.add_argument("--tsize", default=None, type=int, help="test img size")
     parser.add_argument("--seed", default=None, type=int, help="eval seed")
     parser.add_argument(
         "--fp16",
@@ -142,9 +110,7 @@ def main(exp, args, num_gpu):
         random.seed(args.seed)
         torch.manual_seed(args.seed)
         cudnn.deterministic = True
-        warnings.warn(
-            "You have chosen to seed testing. This will turn on the CUDNN deterministic setting, "
-        )
+        warnings.warn("You have chosen to seed testing. This will turn on the CUDNN deterministic setting, ")
 
     is_distributed = num_gpu > 1
 
@@ -156,18 +122,13 @@ def main(exp, args, num_gpu):
 
     file_name = os.path.join(exp.output_dir, args.experiment_name)
 
-    fig_savedir = os.path.join(
-        file_name,
-        datetime.datetime.now().strftime('%y%m%d_%H%M%S'))
+    fig_savedir = os.path.join(file_name, datetime.datetime.now().strftime('%y%m%d_%H%M%S'))
 
     if rank == 0:
         os.makedirs(file_name, exist_ok=True)
         os.makedirs(fig_savedir, exist_ok=True)
 
-    setup_logger(file_name,
-                 distributed_rank=rank,
-                 filename="val_log.txt",
-                 mode="a")
+    setup_logger(file_name, distributed_rank=rank, filename="val_log.txt", mode="a")
     logger.info("Args: {}".format(args))
 
     if args.conf is not None:
@@ -178,11 +139,9 @@ def main(exp, args, num_gpu):
         exp.test_size = (args.tsize, args.tsize)
 
     model = exp.get_model()
-    logger.info("Model Summary: {}".format(get_model_info(
-        model, exp.test_size)))
+    logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
 
-    evaluator = exp.get_evaluator(args.batch_size, is_distributed, args.test,
-                                  args.legacy)
+    evaluator = exp.get_evaluator(args.batch_size, is_distributed, args.test, args.legacy)
     evaluator.per_class_AP = True
     evaluator.per_class_AR = True
 
@@ -209,12 +168,10 @@ def main(exp, args, num_gpu):
         model = fuse_model(model)
 
     if args.trt:
-        assert (
-            not args.fuse and not is_distributed and args.batch_size == 1
-        ), "TensorRT model is not support model fusing and distributed inferencing!"
+        assert (not args.fuse and not is_distributed
+                and args.batch_size == 1), "TensorRT model is not support model fusing and distributed inferencing!"
         trt_file = os.path.join(file_name, "model_trt.pth")
-        assert os.path.exists(
-            trt_file), "TensorRT model is not found!\n Run tools/trt.py first!"
+        assert os.path.exists(trt_file), "TensorRT model is not found!\n Run tools/trt.py first!"
         model.head.decode_in_inference = False
         decoder = model.head.decode_outputs
     else:
@@ -224,8 +181,7 @@ def main(exp, args, num_gpu):
     # start evaluate f1 score
     from tqdm import tqdm
     from collections import ChainMap, defaultdict
-    from yolox.utils import (gather, is_main_process, postprocess, synchronize,
-                             time_synchronized, xyxy2xywh)
+    from yolox.utils import (gather, is_main_process, postprocess, synchronize, time_synchronized, xyxy2xywh)
 
     # variables for inference
     tensor_type = torch.cuda.HalfTensor if args.fp16 else torch.cuda.FloatTensor
@@ -239,19 +195,16 @@ def main(exp, args, num_gpu):
     # variables for F1 score
     threshold_list = np.linspace(0.01, 0.99, num=100 - 1)
 
-    for cur_iter, (imgs, _, info_imgs,
-                   ids) in enumerate(progress_bar(evaluator.dataloader)):
+    for cur_iter, (imgs, _, info_imgs, ids) in enumerate(progress_bar(evaluator.dataloader)):
         with torch.no_grad():
             imgs = imgs.type(tensor_type)
 
             outputs = model(imgs)
 
             for threshold in threshold_list:
-                p_outputs = postprocess(outputs, evaluator.num_classes,
-                                        threshold, evaluator.nmsthre)
+                p_outputs = postprocess(outputs, evaluator.num_classes, threshold, evaluator.nmsthre)
 
-                data_list_elem = evaluator.convert_to_coco_format(
-                    p_outputs, info_imgs, ids, return_outputs=False)
+                data_list_elem = evaluator.convert_to_coco_format(p_outputs, info_imgs, ids, return_outputs=False)
                 if threshold not in data_list:
                     data_list[threshold] = []
 
@@ -260,8 +213,7 @@ def main(exp, args, num_gpu):
         if is_distributed:
             for threshold in threshold_list:
                 data_list[threshold] = gather(data_list[threshold], dst=0)
-                data_list[threshold] = list(
-                    itertools.chain(*data_list[threshold]))
+                data_list[threshold] = list(itertools.chain(*data_list[threshold]))
 
     # Post-metadata gathering for plotting F1 scores
     # GT
@@ -273,8 +225,7 @@ def main(exp, args, num_gpu):
 
         if image_id not in gt_items:
             gt_items[image_id] = []
-        gt_items[image_id].append(
-            [xmin, ymin, xmin + width, ymin + height, category_id])
+        gt_items[image_id].append([xmin, ymin, xmin + width, ymin + height, category_id])
 
     # Inferred results
     infer_items = {}  # image_id -> threshold -> results
@@ -289,13 +240,11 @@ def main(exp, args, num_gpu):
                 infer_items[image_id] = {}
             if threshold not in infer_items[image_id]:
                 infer_items[image_id][threshold] = []
-            infer_items[image_id][threshold].append(
-                [xmin, ymin, xmin + width, ymin + height, category_id, score])
+            infer_items[image_id][threshold].append([xmin, ymin, xmin + width, ymin + height, category_id, score])
 
     # Generate F1 curve
     perclass_f1_scores = []
-    for category_id in sorted(
-            np.unique(np.concatenate(list(gt_items.values()), 0)[:, 4])):
+    for category_id in sorted(np.unique(np.concatenate(list(gt_items.values()), 0)[:, 4])):
         f1_scores = []
         precision_scores = []
         recall_scores = []
@@ -304,11 +253,10 @@ def main(exp, args, num_gpu):
             tp = []  # Matched IoU over threshold
             fp = []  # Doesn't matched IoU over threshold (Inferred items only)
             fn = []  # Doesn't matched IoU over threshold (GT items only)
-            
+
             # pylint: disable=consider-using-dict-items
             for key in gt_items.keys():
-                for g_xmin, g_ymin, g_xmax, g_ymax, g_cat in filter(
-                        lambda d: d[4] == category_id, gt_items[key]):
+                for g_xmin, g_ymin, g_xmax, g_ymax, g_cat in filter(lambda d: d[4] == category_id, gt_items[key]):
                     g_bbox = np.array([g_xmin, g_ymin, g_xmax, g_ymax])
 
                     # Infer 결과가 없는 경우
@@ -320,8 +268,7 @@ def main(exp, args, num_gpu):
                     # 최다 IoU 매칭
                     ious = []
                     items = []
-                    for item in filter(lambda d: d[4] == category_id,
-                                       infer_items[key][threshold]):
+                    for item in filter(lambda d: d[4] == category_id, infer_items[key][threshold]):
                         i_xmin, i_ymin, i_xmax, i_ymax, i_cat, i_score = item
                         i_bbox = np.array([i_xmin, i_ymin, i_xmax, i_ymax])
                         ious.append(iou_np(g_bbox, i_bbox))
@@ -343,8 +290,7 @@ def main(exp, args, num_gpu):
 
                 # 매칭이 끝나고 남은 인퍼런스 결과들은 FP이다.
                 if key in infer_items and threshold in infer_items[key]:
-                    for i_xmin, i_ymin, i_xmax, i_ymax, i_cat, i_score in infer_items[
-                            key][threshold]:
+                    for i_xmin, i_ymin, i_xmax, i_ymax, i_cat, i_score in infer_items[key][threshold]:
                         i_bbox = np.array([i_xmin, i_ymin, i_xmax, i_ymax])
                         fp.append(i_bbox)
 
@@ -361,8 +307,7 @@ def main(exp, args, num_gpu):
             if precision + recall == 0:
                 f1_scores.append(.0)
             else:
-                f1_scores.append(2 * (precision * recall) /
-                                 (precision + recall))
+                f1_scores.append(2 * (precision * recall) / (precision + recall))
 
         if category_id == 1:
             class_name = "helmet_on"
@@ -379,8 +324,7 @@ def main(exp, args, num_gpu):
 
         # Draw F1 score map in each class plot
         logger.info("Drawing F1 score map for class {}".format(class_name))
-        with open(os.path.join(fig_savedir, '{}.txt'.format(class_name)),
-                  'w') as f:
+        with open(os.path.join(fig_savedir, '{}.txt'.format(class_name)), 'w') as f:
             f.write(' '.join(['{:.4f}'.format(i) for i in threshold_list]))
             f.write('\n')
             f.write(' '.join(['{:.4f}'.format(i) for i in f1_scores]))
@@ -388,47 +332,32 @@ def main(exp, args, num_gpu):
         max_threshold = threshold_list[np.argmax(f1_scores)]
 
         plt.figure(figsize=(8, 4))
-        plt.title("{} F1 Score by Detection Threshold (NMS={:.02f})".format(
-            class_name, exp.nmsthre))
-        f1_line, = plt.plot(threshold_list,
-                            f1_scores,
-                            color=color,
-                            linestyle='dashed',
-                            label="F1 Score")
+        plt.title("{} F1 Score by Detection Threshold (NMS={:.02f})".format(class_name, exp.nmsthre))
+        f1_line, = plt.plot(threshold_list, f1_scores, color=color, linestyle='dashed', label="F1 Score")
         precision_line, = plt.plot(threshold_list,
                                    precision_scores,
                                    color="#ff7f00",
                                    linestyle='dashed',
                                    label="Precision")
-        recall_line, = plt.plot(threshold_list,
-                                recall_scores,
-                                color="#007fff",
-                                linestyle='dashed',
-                                label="Recall")
-        max_score_line = plt.axvline(
-            max_threshold,
-            color='r',
-            linestyle='dashdot',
-            label="Max score ({:.02f})".format(max_threshold))
-        plt.legend(
-            handles=[precision_line, recall_line, f1_line, max_score_line],
-            loc='upper right')
+        recall_line, = plt.plot(threshold_list, recall_scores, color="#007fff", linestyle='dashed', label="Recall")
+        max_score_line = plt.axvline(max_threshold,
+                                     color='r',
+                                     linestyle='dashdot',
+                                     label="Max score ({:.02f})".format(max_threshold))
+        plt.legend(handles=[precision_line, recall_line, f1_line, max_score_line], loc='upper right')
         plt.xlabel("Confidence Threshold")
         plt.ylabel("F1 Score")
         plt.xlim(0.0, 1.0)
         plt.ylim(0.0, 1.0)
         plt.xticks(np.arange(0, 1, step=0.1))
         plt.yticks(np.arange(0.1, 1, step=0.1))
-        plt.savefig(os.path.join(fig_savedir, "{}.svg".format(class_name)),
-                    dpi=600,
-                    transparent=True)
+        plt.savefig(os.path.join(fig_savedir, "{}.svg".format(class_name)), dpi=600, transparent=True)
 
         perclass_f1_scores.append(f1_scores)
 
     # Draw and save in single plot
     plt.figure(figsize=(8, 4))
-    plt.title("F1 Score by Detection Threshold (NMS={:.02f})".format(
-        exp.nmsthre))
+    plt.title("F1 Score by Detection Threshold (NMS={:.02f})".format(exp.nmsthre))
     plt.xlabel("Confidence Threshold")
     plt.ylabel("F1 Score")
     plt.xlim(0.0, 1.0)
@@ -468,16 +397,13 @@ def main(exp, args, num_gpu):
         all_lines.append(f1_line)
 
     avg_max_threshold = np.mean(thresholds)
-    max_score_line = plt.axvline(
-        avg_max_threshold,
-        color='r',
-        linestyle='dashdot',
-        label="Average max score ({:.02f})".format(avg_max_threshold))
+    max_score_line = plt.axvline(avg_max_threshold,
+                                 color='r',
+                                 linestyle='dashdot',
+                                 label="Average max score ({:.02f})".format(avg_max_threshold))
 
     plt.legend(handles=[*all_lines, max_score_line], loc='upper right')
-    plt.savefig(os.path.join(fig_savedir, "all.svg"),
-                dpi=600,
-                transparent=True)
+    plt.savefig(os.path.join(fig_savedir, "all.svg"), dpi=600, transparent=True)
 
     logger.info("F1 plots are drawn into {}".format(fig_savedir))
 
@@ -491,8 +417,7 @@ if __name__ == "__main__":
     if not args.experiment_name:
         args.experiment_name = exp.exp_name
 
-    num_gpu = torch.cuda.device_count(
-    ) if args.devices is None else args.devices
+    num_gpu = torch.cuda.device_count() if args.devices is None else args.devices
     assert num_gpu <= torch.cuda.device_count()
 
     dist_url = "auto" if args.dist_url is None else args.dist_url

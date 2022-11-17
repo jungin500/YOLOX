@@ -59,5 +59,4 @@ def iou_torch(bbox1: torch.Tensor, bbox2: torch.Tensor):
     inter_vol = w * h
     union_vol = bbox1_vol + bbox2_vol - inter_vol
 
-    return torch.where(torch.any(inter_xymax < inter_xymin), 0.,
-                       inter_vol / union_vol)
+    return torch.where(torch.any(inter_xymax < inter_xymin), 0., inter_vol / union_vol)

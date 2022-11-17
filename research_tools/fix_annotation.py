@@ -15,13 +15,10 @@ if __name__ == '__main__':
     parser.add_argument('location', help="Folder to find json files")
     args = parser.parse_args()
 
-    json_file_list = glob.glob(os.path.join(args.location, '**', '*.json'),
-                               recursive=True)
+    json_file_list = glob.glob(os.path.join(args.location, '**', '*.json'), recursive=True)
 
     for idx, json_file in enumerate(json_file_list):
-        print("({}/{}) Loading file {} ...".format(idx + 1,
-                                                   len(json_file_list),
-                                                   json_file))
+        print("({}/{}) Loading file {} ...".format(idx + 1, len(json_file_list), json_file))
         with open(json_file) as f:
             body = json.load(f)
 

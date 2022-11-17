@@ -30,12 +30,11 @@ class NaiiveGenerator(DatasetGenerator):
 
         if self.is_distributed:
             self.batch_size = self.batch_size // dist.get_world_size()
-            sampler = torch.utils.data.distributed.DistributedSampler(
-                dataset,
-                rank=get_local_rank(),
-                num_replicas=get_world_size(),
-                shuffle=False,
-                drop_last=False)
+            sampler = torch.utils.data.distributed.DistributedSampler(dataset,
+                                                                      rank=get_local_rank(),
+                                                                      num_replicas=get_world_size(),
+                                                                      shuffle=False,
+                                                                      drop_last=False)
         else:
             sampler = torch.utils.data.SequentialSampler(dataset)
 
@@ -46,8 +45,7 @@ class NaiiveGenerator(DatasetGenerator):
             "collate_fn": collate_fn,
         }
         dataloader_kwargs["batch_size"] = self.batch_size
-        self.dataloader = torch.utils.data.DataLoader(dataset,
-                                                      **dataloader_kwargs)
+        self.dataloader = torch.utils.data.DataLoader(dataset, **dataloader_kwargs)
 
     def generate_dataset(self):
         result_bboxes = []
@@ -102,39 +100,26 @@ class NaiiveGenerator(DatasetGenerator):
         # JSON Annotation 저장하기
         images_map = {item['id']: item for item in self.annotations['images']}
         result_annotations = []
-        for bboxes, cls, scores, image_id in tqdm(
-                zip(result_bboxes, result_cls, result_scores,
-                    result_image_names),
-                desc="Organizing result bboxes",
-                total=len(result_bboxes)):
+        for bboxes, cls, scores, image_id in tqdm(zip(result_bboxes, result_cls, result_scores, result_image_names),
+                                                  desc="Organizing result bboxes",
+                                                  total=len(result_bboxes)):
             for bbox, cls, score in zip(bboxes, cls, scores):
                 bbox = [int(i) for i in bbox]  # np.int64 items does present
-                bbox = [
-                    bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]
-                ]  # xyminmax2xywh
+                bbox = [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]]  # xyminmax2xywh
                 result_annotations.append({
-                    'area':
-                    bbox[2] * bbox[3],
-                    'iscrowd':
-                    0,
-                    'bbox':
-                    bbox,
-                    'category_id':
-                    int(classid2cocoid(cls)),
-                    'det_confidence':
-                    float(score),
-                    'ignore':
-                    0,
+                    'area': bbox[2] * bbox[3],
+                    'iscrowd': 0,
+                    'bbox': bbox,
+                    'category_id': int(classid2cocoid(cls)),
+                    'det_confidence': float(score),
+                    'ignore': 0,
                     'segmentation': [],
-                    'image_id':
-                    image_id,
-                    'id':
-                    len(result_annotations) + 1  # 1부터 시작한다.
+                    'image_id': image_id,
+                    'id': len(result_annotations) + 1  # 1부터 시작한다.
                 })
 
         return {
-            "images":
-            [images_map[image_id] for image_id in result_image_names],
+            "images": [images_map[image_id] for image_id in result_image_names],
             "type": "instances",
             "annotations": result_annotations,
             "categories": self.annotations["categories"]
@@ -173,10 +158,9 @@ class NaiiveAdvancedGenerator(NaiiveGenerator):
         else:
             desc_msg = "Inferencing"
 
-        for total_batch_idx, (img, target, img_info,
-                              img_id) in tqdm(enumerate(self.dataloader),
-                                              desc=desc_msg,
-                                              total=len(self.dataloader)):
+        for total_batch_idx, (img, target, img_info, img_id) in tqdm(enumerate(self.dataloader),
+                                                                     desc=desc_msg,
+                                                                     total=len(self.dataloader)):
             if self.device == 'gpu':
                 img = img.cuda()
             if self.half_precision:
@@ -193,21 +177,18 @@ class NaiiveAdvancedGenerator(NaiiveGenerator):
                 for class_id in range(self.exp.num_classes):
                     conf_thresh, iou_thresh = self.perclass_conf_ious[class_id]
 
-                    per_class_batched_outputs = postprocess(
-                        batched_outputs,
-                        self.exp.num_classes,
-                        conf_thresh,
-                        iou_thresh,
-                        class_agnostic=True)
+                    per_class_batched_outputs = postprocess(batched_outputs,
+                                                            self.exp.num_classes,
+                                                            conf_thresh,
+                                                            iou_thresh,
+                                                            class_agnostic=True)
 
-                    for batch_idx, output in enumerate(
-                            per_class_batched_outputs):
+                    for batch_idx, output in enumerate(per_class_batched_outputs):
                         if output is None:
                             continue
 
-                        ratio = min(
-                            self.exp.test_size[0] / img_info[0][batch_idx],
-                            self.exp.test_size[1] / img_info[1][batch_idx])
+                        ratio = min(self.exp.test_size[0] / img_info[0][batch_idx],
+                                    self.exp.test_size[1] / img_info[1][batch_idx])
 
                         bboxes = output[:, 0:4]
                         # preprocessing: resize
@@ -245,39 +226,26 @@ class NaiiveAdvancedGenerator(NaiiveGenerator):
         # JSON Annotation 저장하기
         images_map = {item['id']: item for item in self.annotations['images']}
         result_annotations = []
-        for bboxes, cls, scores, image_id in tqdm(
-                zip(result_bboxes, result_cls, result_scores,
-                    result_image_names),
-                desc="Organizing result bboxes",
-                total=len(result_bboxes)):
+        for bboxes, cls, scores, image_id in tqdm(zip(result_bboxes, result_cls, result_scores, result_image_names),
+                                                  desc="Organizing result bboxes",
+                                                  total=len(result_bboxes)):
             for bbox, cls, score in zip(bboxes, cls, scores):
                 bbox = [int(i) for i in bbox]  # np.int64 items does present
-                bbox = [
-                    bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]
-                ]  # xyminmax2xywh
+                bbox = [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]]  # xyminmax2xywh
                 result_annotations.append({
-                    'area':
-                    bbox[2] * bbox[3],
-                    'iscrowd':
-                    0,
-                    'bbox':
-                    bbox,
-                    'category_id':
-                    int(classid2cocoid(cls)),
-                    'det_confidence':
-                    score,
-                    'ignore':
-                    0,
+                    'area': bbox[2] * bbox[3],
+                    'iscrowd': 0,
+                    'bbox': bbox,
+                    'category_id': int(classid2cocoid(cls)),
+                    'det_confidence': score,
+                    'ignore': 0,
                     'segmentation': [],
-                    'image_id':
-                    image_id,
-                    'id':
-                    len(result_annotations) + 1  # 1부터 시작한다.
+                    'image_id': image_id,
+                    'id': len(result_annotations) + 1  # 1부터 시작한다.
                 })
 
         return {
-            "images":
-            [images_map[image_id] for image_id in result_image_names],
+            "images": [images_map[image_id] for image_id in result_image_names],
             "type": "instances",
             "annotations": result_annotations,
             "categories": self.annotations["categories"]

@@ -14,8 +14,7 @@ class ValDataPrefetcher:
 
     def preload(self):
         try:
-            self.next_img, self.next_target, self.next_img_info, self.next_img_id = next(
-                self.loader)
+            self.next_img, self.next_target, self.next_img_info, self.next_img_id = next(self.loader)
         except StopIteration:
             self.next_img = None
             self.next_target = None

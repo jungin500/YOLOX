@@ -6,14 +6,7 @@ import tempfile
 
 class DatasetGenerator(object):
 
-    def __init__(self,
-                 exp,
-                 model,
-                 device,
-                 is_distributed,
-                 batch_size,
-                 half_precision,
-                 oneshot_image_ids=None):
+    def __init__(self, exp, model, device, is_distributed, batch_size, half_precision, oneshot_image_ids=None):
         self.exp = exp
         self.model = model
         self.device = device
@@ -22,39 +15,26 @@ class DatasetGenerator(object):
         self.half_precision = half_precision
         self.oneshot_image_ids = oneshot_image_ids
 
-        self._load_coco_annotations(
-            os.path.join(exp.data_dir, 'annotations', exp.train_ann))
+        self._load_coco_annotations(os.path.join(exp.data_dir, 'annotations', exp.train_ann))
         if self.oneshot_image_ids:
             # Manipulate JSON to only have requested single image
-            logger.info(
-                'Loading JSON and filtering {} annotation(s) ...'.format(
-                    len(self.oneshot_image_ids)))
-            with open(
-                    os.path.join(self.exp.data_dir, "annotations",
-                                 self.exp.train_ann), 'r') as f:
+            logger.info('Loading JSON and filtering {} annotation(s) ...'.format(len(self.oneshot_image_ids)))
+            with open(os.path.join(self.exp.data_dir, "annotations", self.exp.train_ann), 'r') as f:
                 body = json.load(f)
 
             new_body = {
-                "images": [
-                    image for image in body["images"]
-                    if image["id"] in self.oneshot_image_ids
-                ],
+                "images": [image for image in body["images"] if image["id"] in self.oneshot_image_ids],
                 "type":
                 "instances",
-                "annotations": [
-                    annotation for annotation in body["annotations"]
-                    if annotation["image_id"] in self.oneshot_image_ids
-                ],
+                "annotations":
+                [annotation for annotation in body["annotations"] if annotation["image_id"] in self.oneshot_image_ids],
                 "categories":
                 self.annotations["categories"]
             }
 
             assert len(new_body["images"]) == len(
-                self.oneshot_image_ids
-            ), "Some of or any of images are found: {}".format(
-                self.oneshot_image_ids)
-            logger.info('Saving annotation: {}'.format(
-                json.dumps(new_body, indent=4)))
+                self.oneshot_image_ids), "Some of or any of images are found: {}".format(self.oneshot_image_ids)
+            logger.info('Saving annotation: {}'.format(json.dumps(new_body, indent=4)))
 
             fd, tmp_json_filename = tempfile.mkstemp(suffix=".json")
             with open(fd, 'w') as f:
