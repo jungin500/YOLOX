@@ -56,6 +56,10 @@ class MultiscaleGenerator(DatasetGenerator):
         # 이 때, 클래스
         self.class_unaware_rematch_thresh = rematch_thresh
 
+        # 결과 bbox mask를 적용해 다시 infer한 결과도 포함
+        self.masked_reinfer = True
+        self.mask_iou_thersh = 0.8
+
     def init(self):
         from yolox.data import (ValTransform, COCODataset)
         import torch.distributed as dist
@@ -106,11 +110,19 @@ class MultiscaleGenerator(DatasetGenerator):
         boxes_scales = {}
         clses_scales = {}
         scores_scales = {}
+        
+        masked_boxes_scales = {}
+        masked_clses_scales = {}
+        masked_scores_scales = {}
         image_names = set()
         for scale in reversed(sorted(self.scales)):
             all_bboxes = {}
             all_clses = {}
             all_scores = {}
+
+            masked_all_bboxes = {}
+            masked_all_clses = {}
+            masked_all_scores = {}
 
             if self.is_distributed:
                 desc_msg = "[Rank {}] Inferencing scale {}".format(
@@ -137,6 +149,79 @@ class MultiscaleGenerator(DatasetGenerator):
                                                   self.exp.nmsthre,
                                                   class_agnostic=True)
 
+                if self.masked_reinfer:
+                    # Create masked image for re-infer
+                    all_img = []
+                    for batch_idx, output in enumerate(batched_outputs):
+                        image_id = img_id[batch_idx]
+
+                        if output is None:
+                            all_img.append(img[batch_idx])
+                            continue
+
+                        bboxes = output[:, 0:4]
+                        cls = output[:, 6]
+                        scores = output[:, 4] * output[:, 5]
+
+                        # 마스크"만" 할당하는 방식
+                        # 나머지 값들은 배경 값이며 BBOX와 패딩 만큼만 할당된다.
+                        # BBOX 이외를 Gaussian Blur 하는 방법도 있을것이다만 그건 나중에.
+                        pad = 10
+                        def clip(value):
+                            if value < 0:
+                                return 0
+                            if scale <= value:
+                                return scale - 1
+                            return int(value)
+
+                        target_img = torch.ones_like(img[batch_idx], dtype=img.dtype, device=img.device) * 114
+                        for xmin, ymin, xmax, ymax in bboxes:  # tsize * tsize 기준
+                            # xmin, ymin, xmax, ymax = [int(k) for k in [xmin, ymin, xmax, ymax]]
+                            xmin, ymin, xmax, ymax = [
+                                clip(xmin - pad),
+                                clip(ymin - pad),
+                                clip(xmax + pad),
+                                clip(ymax + pad)
+                            ]
+                            target_img[:, ymin:ymax, xmin:xmax] = img[batch_idx][:, ymin:ymax, xmin:xmax]
+
+                        all_img.append(target_img)
+                    
+                    # Result BBOX가 존재할 때만 Reinfer를 수행
+                    if all_img:
+                        all_img = torch.stack(all_img, dim=0)
+
+                        # Do re-infer masked image
+                        with torch.no_grad():
+                            mask_batched_outputs = self.model(all_img)
+                            mask_batched_outputs = postprocess(mask_batched_outputs,
+                                                        self.exp.num_classes,
+                                                        self.exp.test_conf,
+                                                        self.exp.nmsthre,
+                                                        class_agnostic=True)
+
+                        for batch_idx, output in enumerate(mask_batched_outputs):
+                            image_id = img_id[batch_idx]
+
+                            if output is None:
+                                masked_all_bboxes[image_id] = np.array([])
+                                masked_all_clses[image_id] = np.array([])
+                                masked_all_scores[image_id] = np.array([])
+                                continue
+
+                            ratio = min(scale / img_info[0][batch_idx],
+                                        scale / img_info[1][batch_idx])
+
+                            bboxes = output[:, 0:4]
+                            # preprocessing: resize
+                            bboxes /= ratio
+                            cls = output[:, 6]
+                            scores = output[:, 4] * output[:, 5]
+
+                            masked_all_bboxes[image_id] = bboxes.cpu().numpy()
+                            masked_all_clses[image_id] = cls.cpu().numpy().astype(int)
+                            masked_all_scores[image_id] = scores.cpu().numpy()
+                    
                 for batch_idx, output in enumerate(batched_outputs):
                     image_id = img_id[batch_idx]
 
@@ -164,6 +249,10 @@ class MultiscaleGenerator(DatasetGenerator):
             boxes_scales[scale] = all_bboxes
             clses_scales[scale] = all_clses
             scores_scales[scale] = all_scores
+
+            masked_boxes_scales[scale] = masked_all_bboxes
+            masked_clses_scales[scale] = masked_all_clses
+            masked_scores_scales[scale] = masked_all_scores
             image_names.update(list(all_bboxes.keys()))
 
         # 각 image_id에 대해 multiscale_match 수행
@@ -181,11 +270,28 @@ class MultiscaleGenerator(DatasetGenerator):
                 scale: scores_scales[scale][image_id]
                 for scale in self.scales if image_id in scores_scales[scale]
             }
+            
+            if self.masked_reinfer:
+                masked_boxes_allscale = {
+                    scale: masked_boxes_scales[scale][image_id]
+                    for scale in self.scales if image_id in masked_boxes_scales[scale]
+                }
+                masked_clses_allscale = {
+                    scale: masked_clses_scales[scale][image_id]
+                    for scale in self.scales if image_id in masked_clses_scales[scale]
+                }
+                masked_scores_allscale = {
+                    scale: masked_scores_scales[scale][image_id]
+                    for scale in self.scales if image_id in masked_scores_scales[scale]
+                }
 
             matched_objects, gt_nonmatched_objects, infer_nonmatched_objects = self.multiscale_match(
                 bboxes_scales=boxes_allscale,
                 cls_scales=clses_allscale,
                 scores_scales=scores_allscale,
+                masked_bboxes_scales=masked_boxes_allscale,
+                masked_cls_scales=masked_clses_allscale,
+                masked_scores_scales=masked_scores_allscale,
                 image_name=image_id,
             )
 
@@ -228,8 +334,40 @@ class MultiscaleGenerator(DatasetGenerator):
             "categories": self.annotations["categories"]
         }
 
-    def multiscale_match(self, image_name, bboxes_scales, cls_scales,
-                         scores_scales):
+    def multiscale_match(self, image_name, bboxes_scales, cls_scales, scores_scales, \
+        masked_bboxes_scales = None, masked_cls_scales = None, masked_scores_scales = None):
+
+        # Masked result가 있음
+        if not isinstance(masked_bboxes_scales, type(None)):
+            # Masked result는 그대로 사용하기에는 모퉁이 부분의 오탐이 몇몇 존재함.
+            # 따라서 IoU 매칭을 진행하여 기존 bboxes, cls, scores를 업데이트 하는 방식을 사용
+            # (새로이 나타난 bounding box는 사용하지 않음)
+            for scale in self.scales:
+                bboxes = bboxes_scales[scale]
+                cls = cls_scales[scale]
+                scores = scores_scales[scale]
+
+                if len(scores) == 0:
+                    continue  # Assign할 원본 result가 없음
+
+                masked_bboxes = masked_bboxes_scales[scale]
+                masked_cls = masked_cls_scales[scale]
+                masked_scores = masked_scores_scales[scale]
+
+                if len(masked_scores) == 0:
+                    continue  # Assign할 masked result가 없음
+
+                for normal_bbox_idx, (bbox, class_id, score) in enumerate(zip(bboxes, cls, scores)):
+                    ious = []
+                    for masked_bbox_idx, (m_bbox, m_class_id, m_score) in enumerate(zip(masked_bboxes, masked_cls, masked_scores)):
+                        ious.append(iou_np(bbox, m_bbox))
+                    ious = np.array(ious)
+
+                    # IoU를 넘는경우 Class ID를 업데이트한다.
+                    maxiou_idx = np.argmax(ious)
+                    if ious[maxiou_idx] >= self.mask_iou_thersh:
+                        cls_scales[scale][normal_bbox_idx] = masked_cls_scales[scale][maxiou_idx]
+
         if image_name not in self.annotation_map:
             # 어노테이션 없는 빈 이미지 (Background)
             o_items = []
