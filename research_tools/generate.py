@@ -628,6 +628,7 @@ def visualize(exp,
     demo_ds_args = demo_make_parser().parse_args([
         '--seed',
         str(args.seed),
+        '--display',
         '--image-root',
         os.path.join(exp.data_dir, 'train2017'),
         *extra_args,

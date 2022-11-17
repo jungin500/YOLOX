@@ -34,6 +34,10 @@ def make_parser():
                         default=None,
                         type=int,
                         help="Shuffle seed for displaying same image")
+    parser.add_argument("--display",
+                        default=False,
+                        action='store_true',
+                        help="Display result image")
     parser.add_argument("--save",
                         default=False,
                         action='store_true',
@@ -77,9 +81,12 @@ def main(args):
         assert os.path.exists(
             args.save_path), "Save path {} not found!".format(args.save_path)
     vis_window_title = 'Dataset visualization'
-    cv2.namedWindow(
-        vis_window_title,
-        cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+    if args.display:
+        cv2.namedWindow(
+            vis_window_title,
+            cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+    else:
+        logger.warning("Image display disabled")
 
     logger.info("Loading annotation ...")
     with open(args.coco_annotation, 'r') as f:
@@ -266,7 +273,7 @@ def main(args):
 
         if args.save:
             cv2.imwrite(os.path.join(args.save_path, image_id + ".jpg"), image)
-        else:
+        if args.display:
             if args.small:
                 # Ratio-perserve resizing
                 r_image = image.shape[0] / image.shape[1]  # H / W
