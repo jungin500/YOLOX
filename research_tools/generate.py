@@ -272,9 +272,14 @@ def main(exp, args, num_gpu):
             save_result(output_path=args.output_path, coco_result=coco_result)
 
             if args.conf_eval or args.eval:
-                ap5095, ap50, ap_s, ap_m, ap_l, AP_perclass, AR_perclass, AP50_perclass = eval_coco(
-                    trainval_json=os.path.join(exp.data_dir, 'annotations', exp.train_ann),
-                    generated_json=args.output_path)
+                if len(coco_result["annotations"]) > 0:
+                    ap5095, ap50, ap_s, ap_m, ap_l, AP_perclass, AR_perclass, AP50_perclass = eval_coco(
+                        trainval_json=os.path.join(exp.data_dir, 'annotations', exp.train_ann),
+                        generated_json=args.output_path)
+                else:
+                    num_classes = len(coco_result["categories"])
+                    ap5095, ap50, ap_s, ap_m, ap_l, AP_perclass, AR_perclass, AP50_perclass = \
+                        0.0, 0.0, 0.0, 0.0, 0.0, [0.0] * num_classes, [0.0] * num_classes, [0.0] * num_classes
 
                 all_ap5095.append(ap5095)
                 all_ap50.append(ap50)
