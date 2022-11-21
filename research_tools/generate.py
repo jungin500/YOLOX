@@ -216,7 +216,7 @@ def main(exp, args, num_gpu):
 
     if args.conf_eval:
         # Evaluation할 때는 0.01 ~ 0.99까지 전부 사용
-        conf_thresh_space = np.linspace(0.1, 0.9, num=10 - 1)
+        conf_thresh_space = np.linspace(0.01, 0.99, num=100 - 1)
     else:
         # 이 외에는 하나만 Evaluate
         conf_thresh_space = [exp.test_conf]
@@ -231,17 +231,18 @@ def main(exp, args, num_gpu):
     all_AR_perclass = []
     all_AP50_perclass = []
 
+    master_rank = 0
     for conf_thresh_idx, conf_thresh in enumerate(conf_thresh_space):
         logger.info("Running confidence threshold {} ({}/{})".format(conf_thresh, conf_thresh_idx + 1,
                                                                      len(conf_thresh_space)))
         # Wait for previous master node to finish evaluation
-        dist.barrier()
+        if is_distributed:
+            dist.barrier()
 
         # Target test confidence
         exp.test_conf = conf_thresh
         args.conf = conf_thresh
 
-        reduce_master_rank = 0
         coco_result = generate(exp=exp,
                                model=model,
                                args=args,
@@ -250,9 +251,9 @@ def main(exp, args, num_gpu):
                                world_size=world_size,
                                oneshot_image_ids=oneshot_image_ids,
                                scales=scales,
-                               reduce_master_rank=reduce_master_rank)
+                               reduce_master_rank=master_rank)
 
-        if rank != reduce_master_rank:
+        if rank != master_rank:
             continue  # Continue next conf thresh
 
         if args.image_ids:
@@ -284,10 +285,15 @@ def main(exp, args, num_gpu):
                 all_AR_perclass.append(AR_perclass)
                 all_AP50_perclass.append(AP50_perclass)
 
-    if args.conf_eval or args.eval:
-        plot_result(exp, fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
+    if (not is_distributed) or (is_distributed and rank == master_rank):
+        if args.conf_eval or args.eval:
+            plot_result(exp, fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
                     all_AR_perclass, all_AP50_perclass)
-    logger.info("Done generating annotations, exiting ...")
+        logger.info("Done generating annotations, exiting ...")
+    else:
+        # Distributed이면서 Rank가 master가 아닌 경우.
+        # 조용히 종료.
+        pass
 
 
 def plot_result(exp, fig_savedir, conf_thresh_space, all_ap5095, all_ap50, all_ap_s, all_ap_m, all_ap_l, all_AP_perclass,
@@ -553,10 +559,14 @@ def reduce_coco_result(rank, world_size, output_path, coco_result, to_rank=0):
 
         # Sanity check
         assert len(all_annotations) > 0, "Empty annotation?"
+
+        target_annotations = []
         for idx, annotation in enumerate(all_annotations):
             json_filename = output_path + '.r{}.tmp'.format(idx)
-            assert len(annotation["images"]) > 0, "Empty images in file {}".format(json_filename)
-            assert len(annotation["annotations"]) > 0, "Empty annotations in file {}".format(json_filename)
+            if not (len(annotation["images"]) == 0 or len(annotation["annotations"]) == 0):
+                target_annotations.append(annotation)
+            else:
+                print("Empty annotation in file {}".format(json_filename))
         assert len(set([json.dumps(annotation["categories"]) for annotation in all_annotations])) == 1, \
             "Different categories between annotations!"
 
