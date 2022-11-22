@@ -106,7 +106,7 @@ def eval_coco(trainval_json, generated_json):
         cocoEval_50.accumulate()
 
     AP50_table = per_class_AP_table(cocoEval_50, class_names=cat_names)
-    AP50_perclass = per_class_AP(cocoEval, class_names=cat_names)
+    AP50_perclass = per_class_AP(cocoEval_50, class_names=cat_names)
     info += "per class AP(IoU=0.5):\n" + AP50_table + "\n"
 
     print(info)
