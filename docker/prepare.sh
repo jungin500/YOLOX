@@ -65,7 +65,7 @@ ln -fs /usr/share/zoneinfo/Asia/Seoul /etc/localtime
 DEBIAN_FRONTEND=noninteractive apt-get -qq -y install tzdata
 
 # export Artifact directory for later use (after this script)
-ARTIFACT_DIR=${ARTIFACT_ROOT}/$(hostname | cut -c 11-)_$(date +%Y%m%d_%H%M)
+ARTIFACT_DIR=${ARTIFACT_ROOT}/$(hostname)_$(date +%Y%m%d_%H%M)
 mkdir ${ARTIFACT_DIR}
 
 # Clone repository
