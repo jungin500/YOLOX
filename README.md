@@ -1,3 +1,13 @@
+# Small-Scale Object Detection Label Reassignment Strategy
+- [Small-Scale Object Detection Label Reassignment Strategy](http://journal.kci.go.kr/jksci/archive/articleView?artiId=ART002908028) paper source code, based on YOLOX
+
+## Features
+- Evaluation metrics accumulation &amp; visualization using `wandb`
+- F1 score evaulation
+- $AP_{50:95}$ score generation by confidence threshold
+- Per-class box label distribution analysis
+___
+
 <div align="center"><img src="assets/logo.png" width="350"></div>
 <img src="assets/demo.png" >
 
